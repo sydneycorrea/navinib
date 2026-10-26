@@ -72,3 +72,12 @@ def test_lab_tech_is_a_contact_not_a_call_target(con):
     assert "Kevin Tran" not in names
     source = con.execute("SELECT source_contact_id FROM lab_alert WHERE provider_id = ?", (LEE,)).fetchone()[0]
     assert source == staff["Kevin Tran"]["contact_id"]
+
+
+def test_phone_calls_dont_count_as_visits(con):
+    types = {r[0] for r in con.execute("SELECT DISTINCT call_type FROM visit")}
+    assert types == {"face_to_face", "phone"}
+    # Dr. Lee had a phone call on Oct 14, but her last in-person visit was Sep 23 (34 days).
+    lee = provider_scoring(con, [p for p in provider_lookup(con, "rep-01", config.DEMO_DATE)
+                                 if p["provider_id"] == LEE], config.DEMO_DATE)[0]
+    assert "last in-person visit 34 days ago" in lee["reasons"]

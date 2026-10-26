@@ -25,7 +25,7 @@ QUERIES = {
         SELECT c.contact_id, c.full_name, c.role, c.location_id, l.affiliation, c.notes
         FROM contact c JOIN location l USING (location_id) ORDER BY c.contact_id""",
     "call_history.csv": """
-        SELECT v.visit_id, v.date, v.outcome, v.provider_id, p.full_name, p.tier
+        SELECT v.visit_id, v.date, v.call_type, v.outcome, v.provider_id, p.full_name, p.tier
         FROM visit v JOIN provider p USING (provider_id) ORDER BY v.date DESC, v.visit_id""",
     "demo_day_schedule.csv": f"""
         SELECT e.event_id, e.date, {HHMM.format('e.start_min')} AS start, {HHMM.format('e.end_min')} AS "end",

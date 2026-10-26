@@ -59,7 +59,8 @@ CREATE TABLE IF NOT EXISTS visit (
     provider_id TEXT NOT NULL REFERENCES provider(provider_id),
     rep_id      TEXT NOT NULL REFERENCES rep(rep_id),
     date        TEXT NOT NULL,            -- ISO date
-    outcome     TEXT NOT NULL CHECK (outcome IN ('completed', 'cancelled', 'rescheduled'))
+    outcome     TEXT NOT NULL CHECK (outcome IN ('completed', 'cancelled', 'rescheduled')),
+    call_type   TEXT NOT NULL DEFAULT 'face_to_face' CHECK (call_type IN ('face_to_face', 'phone'))
 );
 CREATE TABLE IF NOT EXISTS lab_alert (
     provider_id TEXT PRIMARY KEY REFERENCES provider(provider_id),

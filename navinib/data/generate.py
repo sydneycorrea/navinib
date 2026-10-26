@@ -78,6 +78,10 @@ CONTACTS = [
 ]
 LAB_ALERT_SOURCES = {"p-001": "c-001"}
 
+# Phone calls for the story providers. They are logged in call history but don't
+# count toward in-person call goals or visit recency.
+NAMED_PHONE_CALLS = {"p-004": ["2026-10-16"], "p-001": ["2026-10-14"]}
+
 # Last visits for the named providers, taken from the call notes.
 NAMED_VISITS = {"p-001": ["2026-08-12", "2026-09-23"], "p-002": ["2026-09-30"],
                 "p-003": ["2026-10-02"], "p-004": ["2026-10-07"]}
@@ -163,7 +167,9 @@ def generate(path: Path | str = config.DB_PATH, seed: int = config.SEED) -> Path
     demo = date.fromisoformat(config.DEMO_DATE)
     visits = []
     for pid, dates in NAMED_VISITS.items():
-        visits += [(pid, d, "completed") for d in dates]
+        visits += [(pid, d, "completed", "face_to_face") for d in dates]
+    for pid, dates in NAMED_PHONE_CALLS.items():
+        visits += [(pid, d, "completed", "phone") for d in dates]
     for p in providers:
         if p[0] in NAMED_VISITS or p[0] in ("p-005", "p-006"):
             continue
@@ -172,12 +178,13 @@ def generate(path: Path | str = config.DB_PATH, seed: int = config.SEED) -> Path
             if d.weekday() >= 5:          # reps don't call on weekends
                 d -= timedelta(days=d.weekday() - 4)
             outcome = rng.choices(["completed", "cancelled", "rescheduled"], weights=[8, 1, 1])[0]
-            visits.append((p[0], d.isoformat(), outcome))
-    visits += [("p-005", (demo - timedelta(days=41)).isoformat(), "completed"),
-               ("p-006", (demo - timedelta(days=12)).isoformat(), "completed")]
+            call_type = rng.choices(["face_to_face", "phone"], weights=[3, 1])[0]
+            visits.append((p[0], d.isoformat(), outcome, call_type))
+    visits += [("p-005", (demo - timedelta(days=41)).isoformat(), "completed", "face_to_face"),
+               ("p-006", (demo - timedelta(days=12)).isoformat(), "completed", "face_to_face")]
     visits.sort(key=lambda v: (v[1], v[0]))
-    con.executemany("INSERT INTO visit VALUES (?, ?, ?, ?, ?)",
-                    [(f"v-{n:04d}", pid, rep_id, d, o) for n, (pid, d, o) in enumerate(visits, 1)])
+    con.executemany("INSERT INTO visit VALUES (?, ?, ?, ?, ?, ?)",
+                    [(f"v-{n:04d}", pid, rep_id, d, o, t) for n, (pid, d, o, t) in enumerate(visits, 1)])
 
     con.executemany(
         "INSERT INTO schedule_event (event_id, rep_id, date, start_min, end_min, kind, provider_id,"

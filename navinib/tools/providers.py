@@ -60,7 +60,11 @@ def provider_lookup(con: sqlite3.Connection, rep_id: str, day: str,
 
 
 def provider_scoring(con: sqlite3.Connection, providers: list[dict], today: str) -> list[dict]:
-    """Score and rank providers; each result carries its breakdown and plain-language reasons."""
+    """Score and rank providers; each result carries its breakdown and plain-language reasons.
+
+    Goals and recency count completed face-to-face calls only; phone calls are logged
+    in call history but don't replace an in-person visit.
+    """
     if not providers:
         return []
     t = date.fromisoformat(today)
@@ -75,8 +79,10 @@ def provider_scoring(con: sqlite3.Connection, providers: list[dict], today: str)
     for p in providers:
         pid = p["provider_id"]
         last = con.execute("SELECT MAX(date) FROM visit WHERE provider_id = ? AND outcome = 'completed'"
+                           " AND call_type = 'face_to_face'"
                            " AND date < ?", (pid, today)).fetchone()[0]
         done = con.execute("SELECT COUNT(*) FROM visit WHERE provider_id = ? AND outcome = 'completed'"
+                           " AND call_type = 'face_to_face'"
                            " AND date >= ? AND date < ?", (pid, month_start, today)).fetchone()[0]
         goal = config.CALL_GOALS[p["tier"]]
         days = (t - date.fromisoformat(last)).days if last else None
@@ -92,7 +98,7 @@ def provider_scoring(con: sqlite3.Connection, providers: list[dict], today: str)
             f"oncology volume {vol.get(pid, 0)} claims/quarter",
             f"{done} of {goal} tier-{p['tier']} calls done this month",
             f"open lab alerts {alert_display(alerts.get(pid, 0))}",
-            "never visited" if days is None else f"last visit {days} days ago",
+            "never visited" if days is None else f"last in-person visit {days} days ago",
         ]
         ranked.append({**p, "score": round(sum(breakdown.values()), 3),
                        "breakdown": breakdown, "reasons": reasons})
