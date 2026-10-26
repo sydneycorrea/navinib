@@ -48,6 +48,18 @@ CREATE TABLE IF NOT EXISTS contact (        -- non-prescribing staff at a locati
     role          TEXT NOT NULL,          -- lab_technician | nurse_navigator
     notes         TEXT
 );
+CREATE TABLE IF NOT EXISTS publication (    -- synthetic, PubMed-style; abstracts are indexed in Chroma
+    pub_id        TEXT PRIMARY KEY,
+    title         TEXT NOT NULL,
+    journal       TEXT NOT NULL,
+    year          INTEGER NOT NULL,
+    use_status    TEXT NOT NULL CHECK (use_status IN ('approved_use', 'investigational_use', 'general'))
+);
+CREATE TABLE IF NOT EXISTS publication_author (
+    pub_id        TEXT NOT NULL REFERENCES publication(pub_id),
+    provider_id   TEXT NOT NULL REFERENCES provider(provider_id),
+    PRIMARY KEY (pub_id, provider_id)
+);
 CREATE TABLE IF NOT EXISTS prescribing (
     provider_id      TEXT PRIMARY KEY REFERENCES provider(provider_id),
     product_x        INTEGER NOT NULL,    -- synthetic claims per quarter

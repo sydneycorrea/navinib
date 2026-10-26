@@ -75,3 +75,45 @@ CALL_NOTES = [
      "Dr. Okafor has not prescribed Product X yet. Wants response-rate and duration data in "
      "previously treated patients. Busy clinic, best reached before 10am."),
 ]
+
+# Provider publications (synthetic, PubMed-style; journals are fictional). source = "publication".
+# use_status says what the paper is about, so the brief can keep the rep on-label:
+#   approved_use        the approved indication or label monitoring
+#   investigational_use an unapproved use: background only, the rep must not discuss it
+#   general             not about a specific drug
+# Some providers have none (Okafor, Hillcrest), which the brief reports as "none found".
+PUBLICATIONS = [
+    # pub_id, author provider_ids, title, journal, year, use_status, abstract
+    ("PUB-SYN-001", ["p-001", "p-006"],
+     "Managing neutropenia in older adults on oral kinase inhibitors: a community practice experience",
+     "Allegro Oncology Reports", 2025, "approved_use",
+     "Retrospective review of 64 patients aged 65 and older treated with oral kinase inhibitors for "
+     "previously treated NSCLC at two community practices. Grade 3 or 4 neutropenia occurred in 18%, "
+     "most often in the first 6 weeks. Following the label's dose-reduction steps resolved most "
+     "episodes without stopping treatment. The authors recommend a printed dose-modification "
+     "reference for clinic staff."),
+    ("PUB-SYN-002", ["p-001"],
+     "Bringing lab monitoring closer to home: CBC draws for patients who travel far for cancer care",
+     "Meridian Journal of Cancer Care", 2026, "general",
+     "Quality-improvement study at one practice. Partnering with local labs and a nurse navigator "
+     "cut missed 2-weekly CBC draws from 27% to 9% for patients living more than 40 miles away. "
+     "Results were sent to the practice lab for review before each visit."),
+    ("PUB-SYN-003", ["p-002"],
+     "Kinase inhibitors as first-line therapy in biomarker Y NSCLC: a narrative review",
+     "Northfield Thoracic Review", 2026, "investigational_use",
+     "Reviews early-phase data on kinase inhibitors given first line in treatment-naive biomarker Y "
+     "NSCLC, including preliminary response rates from phase 2 studies. The author notes that "
+     "first-line use is not approved and that randomized data are pending."),
+    ("PUB-SYN-004", ["p-003"],
+     "Liver function monitoring patterns with targeted oncology therapies",
+     "Calder Oncology Pharmacy", 2025, "approved_use",
+     "Survey of 41 practices on how often liver tests are drawn for patients on targeted therapies. "
+     "Monthly testing, as recommended in most labels, was followed in 70% of practices. ALT above "
+     "5 times the upper limit of normal most often led to a dose hold and reduction."),
+    ("PUB-SYN-005", ["p-006"],
+     "Hematologic toxicity of kinase inhibitor and immunotherapy combinations in small cell lung cancer",
+     "Lakeshore Lung Letters", 2024, "investigational_use",
+     "Pooled safety analysis from two phase 1b combination studies in small cell lung cancer. "
+     "Dose-limiting neutropenia was seen at the highest dose levels. Combination use is "
+     "investigational."),
+]

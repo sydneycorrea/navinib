@@ -37,4 +37,5 @@ def test_csv_export(tmp_path):
     from navinib.data.export_csv import export
     out = export(tmp_path / "csv", generate(tmp_path / "x.db"))
     assert {p.name for p in out.iterdir()} == {"providers.csv", "contacts.csv", "call_history.csv",
-                                               "demo_day_schedule.csv", "call_notes.csv"}
+                                               "demo_day_schedule.csv", "call_notes.csv",
+                                               "publications.csv"}

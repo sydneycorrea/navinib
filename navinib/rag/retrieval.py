@@ -2,11 +2,12 @@
 
 Run the 3.1 demo:  python -m navinib.rag.retrieval
 
-Builds a Chroma vector store from the synthetic corpus and exposes the three
+Builds a Chroma vector store from the synthetic corpus and exposes the
 retrieval tools the ReAct planner calls in Action 4 (build the brief):
-  label_lookup      approved label text and approved trial data
-  call_note_recall  past call notes for one provider (long-term memory)
-  trial_search      trial summaries, tagged approved or investigational
+  label_lookup        approved label text and approved trial data
+  call_note_recall    past call notes for one provider (long-term memory)
+  trial_search        trial summaries, tagged approved or investigational
+  publication_search  the provider's own publications, tagged by use_status
 
 Embeddings: all-MiniLM-L6-v2 (free, runs locally through Chroma's ONNX build).
 """
@@ -17,7 +18,7 @@ import numpy as np
 from chromadb.utils import embedding_functions
 
 from navinib.config import CHROMA_PATH
-from navinib.rag.corpus import CALL_NOTES, LABEL, TRIALS
+from navinib.rag.corpus import CALL_NOTES, LABEL, PUBLICATIONS, TRIALS
 
 CHUNK_WORDS, OVERLAP_WORDS = 300, 50   # ~400 tokens with 50-word overlap
 MIN_SIM = 0.30                          # below this, treat as "not found"
@@ -55,6 +56,12 @@ def build_index(path=CHROMA_PATH):
         ids.append(nid)
         docs.append(f"{name}, {date}: {text}")
         metas.append({"source": "call_note", "provider_id": pid, "date": date, "ref": nid})
+    for pub_id, authors, title, journal, year, use_status, abstract in PUBLICATIONS:
+        for pid in authors:  # one entry per author so the provider_id filter stays exact
+            ids.append(f"{pub_id}-{pid}")
+            docs.append(f"{title}. {journal}, {year}. {abstract}")
+            metas.append({"source": "publication", "provider_id": pid, "status": use_status,
+                          "year": year, "ref": pub_id})
     col.add(ids=ids, documents=docs, metadatas=metas)
     return col
 
@@ -86,8 +93,21 @@ def call_note_recall(col, provider_id, query, k=2):
     return _search(col, query, {"$and": [{"source": "call_note"}, {"provider_id": provider_id}]}, k)
 
 
+def recent_call_notes(col, provider_id, k=2):
+    """The provider's latest notes by date, with no similarity cut-off (used when there's no topic)."""
+    r = col.get(where={"$and": [{"source": "call_note"}, {"provider_id": provider_id}]},
+                include=["documents", "metadatas"])
+    hits = [{"id": i, "sim": None, "meta": m, "text": t}
+            for i, m, t in zip(r["ids"], r["metadatas"], r["documents"])]
+    return sorted(hits, key=lambda h: h["meta"]["date"], reverse=True)[:k]
+
+
 def trial_search(col, query, k=2):
     return _search(col, query, {"source": "trial"}, k)
+
+
+def publication_search(col, provider_id, query, k=2):
+    return _search(col, query, {"$and": [{"source": "publication"}, {"provider_id": provider_id}]}, k)
 
 
 def naive_search(col, query, k=4):

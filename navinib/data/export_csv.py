@@ -24,6 +24,11 @@ QUERIES = {
     "contacts.csv": """
         SELECT c.contact_id, c.full_name, c.role, c.location_id, l.affiliation, c.notes
         FROM contact c JOIN location l USING (location_id) ORDER BY c.contact_id""",
+    "publications.csv": """
+        SELECT pb.pub_id, pb.year, pb.title, pb.journal, pb.use_status,
+               group_concat(p.full_name, '; ') AS authors
+        FROM publication pb JOIN publication_author pa USING (pub_id) JOIN provider p USING (provider_id)
+        GROUP BY pb.pub_id ORDER BY pb.year DESC, pb.pub_id""",
     "call_history.csv": """
         SELECT v.visit_id, v.date, v.call_type, v.outcome, v.provider_id, p.full_name, p.tier
         FROM visit v JOIN provider p USING (provider_id) ORDER BY v.date DESC, v.visit_id""",

@@ -15,6 +15,7 @@ Phase 1 of the MVP plan (Oct 27 to Nov 2): synthetic data, SQLite, the first too
 | Synthetic world generator + SQLite schema | Done |
 | Schedule lookup, provider lookup, provider scoring | Done |
 | Retrieval for pre-call briefs (Chroma + all-MiniLM-L6-v2) | Done (ported from 3.1) |
+| Pre-call brief inputs: notes, publications, label points, do-not-raise list, contacts | Done (LLM write-up in phase 2) |
 | Route optimizer (OR-Tools, time windows) | Next |
 | Tree-of-Thought replan | Phase 1 |
 | ReAct planner (LangGraph + free OpenRouter model) | Phase 2 |
@@ -36,9 +37,10 @@ navinib/
   tools/               specialist tools the planner calls
     schedule.py        schedule lookup, cancel a call
     providers.py       provider lookup, scoring with explanations, location contacts
+    brief.py           pre-call brief inputs, each with its source id
   rag/                 retrieval for pre-call briefs
-    corpus.py          fictional Product X label, trials, call notes
-    retrieval.py       label lookup, trial search, call-note recall
+    corpus.py          fictional Product X label, trials, call notes, provider publications
+    retrieval.py       label lookup, trial search, call-note recall, publication search
 tests/                 pytest suite
 ```
 
@@ -54,6 +56,7 @@ pip install -r requirements.txt
 python -m navinib.data.generate  # writes data/navinib.db
 python -m navinib.data.export_csv  # optional: CSVs for review in data/csv/
 python -m navinib.rag.retrieval  # Checkpoint 3.1 retrieval demo
+python -m navinib.tools.brief p-001  # pre-call brief for Dr. Lee
 pytest                           # runs the tests
 ```
 

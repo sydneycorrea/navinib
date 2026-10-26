@@ -14,6 +14,7 @@ from pathlib import Path
 
 from navinib import config
 from navinib.db import connect, create_schema
+from navinib.rag.corpus import PUBLICATIONS
 
 LAT_RANGE, LON_RANGE = (40.38, 40.52), (-80.10, -79.88)
 
@@ -159,6 +160,10 @@ def generate(path: Path | str = config.DB_PATH, seed: int = config.SEED) -> Path
     con.executemany("INSERT INTO location VALUES (?, ?, ?, ?, ?, ?)", locations)
     con.executemany("INSERT INTO location_hours VALUES (?, ?, ?, ?)", hours)
     con.executemany("INSERT INTO contact VALUES (?, ?, ?, ?, ?)", CONTACTS)
+    con.executemany("INSERT INTO publication VALUES (?, ?, ?, ?, ?)",
+                    [(pub, title, journal, year, use) for pub, _, title, journal, year, use, _ in PUBLICATIONS])
+    con.executemany("INSERT INTO publication_author VALUES (?, ?)",
+                    [(pub, pid) for pub, authors, *_ in PUBLICATIONS for pid in authors])
     con.executemany("INSERT INTO prescribing VALUES (?, ?, ?, ?)", prescribing)
     con.executemany("INSERT INTO lab_alert VALUES (?, ?, ?)",
                     [(pid, n, LAB_ALERT_SOURCES.get(pid)) for pid, n in alerts])
