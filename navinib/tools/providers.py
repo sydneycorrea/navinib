@@ -98,3 +98,9 @@ def provider_scoring(con: sqlite3.Connection, providers: list[dict], today: str)
                        "breakdown": breakdown, "reasons": reasons})
     ranked.sort(key=lambda x: x["score"], reverse=True)
     return ranked
+
+
+def location_contacts(con: sqlite3.Connection, location_id: str) -> list[dict]:
+    """Non-prescribing staff at a location, for the pre-call brief. Never scored or routed."""
+    rows = con.execute("SELECT * FROM contact WHERE location_id = ? ORDER BY contact_id", (location_id,))
+    return [dict(r) for r in rows]

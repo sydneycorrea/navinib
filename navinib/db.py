@@ -41,6 +41,13 @@ CREATE TABLE IF NOT EXISTS location_hours ( -- office hours per weekday; no row 
     close_min     INTEGER NOT NULL,
     PRIMARY KEY (location_id, weekday)
 );
+CREATE TABLE IF NOT EXISTS contact (        -- non-prescribing staff at a location (lab tech, nurse navigator)
+    contact_id    TEXT PRIMARY KEY,       -- sequence number, e.g. c-001
+    location_id   TEXT NOT NULL REFERENCES location(location_id),
+    full_name     TEXT NOT NULL,          -- fictional
+    role          TEXT NOT NULL,          -- lab_technician | nurse_navigator
+    notes         TEXT
+);
 CREATE TABLE IF NOT EXISTS prescribing (
     provider_id      TEXT PRIMARY KEY REFERENCES provider(provider_id),
     product_x        INTEGER NOT NULL,    -- synthetic claims per quarter
@@ -56,7 +63,8 @@ CREATE TABLE IF NOT EXISTS visit (
 );
 CREATE TABLE IF NOT EXISTS lab_alert (
     provider_id TEXT PRIMARY KEY REFERENCES provider(provider_id),
-    open_count  INTEGER NOT NULL          -- provider level only, never patient level
+    open_count  INTEGER NOT NULL,         -- provider level only, never patient level
+    source_contact_id TEXT REFERENCES contact(contact_id)  -- who supplies the test data, if known
 );
 CREATE TABLE IF NOT EXISTS schedule_event (
     event_id    TEXT PRIMARY KEY,

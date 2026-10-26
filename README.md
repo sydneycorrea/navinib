@@ -30,10 +30,11 @@ navinib/
   config.py            settings, scoring weights, demo date
   db.py                SQLite schema (providers, their locations and weekday hours, visits, schedule)
   data/generate.py     seeded synthetic world (rep, 40 providers, visits, demo-day schedule)
-                       Dr. Leigh (p-002) works at two locations on different days
+                       Dr. Leigh (p-002) works at two locations on different days;
+                       lab tech Kevin Tran (c-001) is a non-prescribing contact at L-001
   tools/               specialist tools the planner calls
     schedule.py        schedule lookup, cancel a call
-    providers.py       provider lookup, scoring with explanations
+    providers.py       provider lookup, scoring with explanations, location contacts
   rag/                 retrieval for pre-call briefs
     corpus.py          fictional Product X label, trials, call notes
     retrieval.py       label lookup, trial search, call-note recall

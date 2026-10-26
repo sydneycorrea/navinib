@@ -66,6 +66,18 @@ NAMED = [
      [("Brightwater Hematology Group", 40.470, -79.900, every_weekday(9 * 60, 17 * 60 + 30))]),
 ]
 
+# Staff who don't prescribe and are never call targets, tied to a location.
+# Kevin Tran runs the lab at Dr. Lee's practice (L-001) and supplies the test data
+# behind her lab alerts. Maria Gomez is the nurse navigator from call note N-0412.
+CONTACTS = [
+    # contact_id, location_id, full_name, role, notes
+    ("c-001", "L-001", "Kevin Tran", "lab_technician",
+     "Runs CBC and liver panels in the practice lab; sends results that feed lab alerts."),
+    ("c-002", "L-001", "Maria Gomez", "nurse_navigator",
+     "Coordinates patient labs; prefers rep visits after 2pm."),
+]
+LAB_ALERT_SOURCES = {"p-001": "c-001"}
+
 # Last visits for the named providers, taken from the call notes.
 NAMED_VISITS = {"p-001": ["2026-08-12", "2026-09-23"], "p-002": ["2026-09-30"],
                 "p-003": ["2026-10-02"], "p-004": ["2026-10-07"]}
@@ -142,8 +154,10 @@ def generate(path: Path | str = config.DB_PATH, seed: int = config.SEED) -> Path
     con.executemany("INSERT INTO provider VALUES (?, ?, ?, ?, ?, ?)", providers)
     con.executemany("INSERT INTO location VALUES (?, ?, ?, ?, ?, ?)", locations)
     con.executemany("INSERT INTO location_hours VALUES (?, ?, ?, ?)", hours)
+    con.executemany("INSERT INTO contact VALUES (?, ?, ?, ?, ?)", CONTACTS)
     con.executemany("INSERT INTO prescribing VALUES (?, ?, ?, ?)", prescribing)
-    con.executemany("INSERT INTO lab_alert VALUES (?, ?)", alerts)
+    con.executemany("INSERT INTO lab_alert VALUES (?, ?, ?)",
+                    [(pid, n, LAB_ALERT_SOURCES.get(pid)) for pid, n in alerts])
 
     # Visit history over the 90 days before the demo day.
     demo = date.fromisoformat(config.DEMO_DATE)

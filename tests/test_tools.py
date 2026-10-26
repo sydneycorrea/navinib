@@ -1,5 +1,6 @@
 from navinib import config
-from navinib.tools import cancel_event, provider_lookup, provider_scoring, schedule_lookup
+from navinib.tools import (cancel_event, location_contacts, provider_lookup, provider_scoring,
+                           schedule_lookup)
 from navinib.tools.providers import alert_display
 
 LEE, LEIGH, SMITH, HILLCREST = "p-001", "p-002", "p-003", "p-005"   # fixed providers in data/generate.py
@@ -62,3 +63,12 @@ def test_provider_with_two_locations_follows_the_weekday(con):
 def test_two_location_provider_cant_fill_the_2pm_gap(con):
     window = provider_lookup(con, "rep-01", config.DEMO_DATE, open_from=14 * 60, open_until=15 * 60 + 30)
     assert LEIGH not in {p["provider_id"] for p in window}
+
+
+def test_lab_tech_is_a_contact_not_a_call_target(con):
+    staff = {c["full_name"]: c for c in location_contacts(con, "L-001")}   # Dr. Lee's practice
+    assert staff["Kevin Tran"]["role"] == "lab_technician"
+    names = {p["full_name"] for p in provider_lookup(con, "rep-01", config.DEMO_DATE)}
+    assert "Kevin Tran" not in names
+    source = con.execute("SELECT source_contact_id FROM lab_alert WHERE provider_id = ?", (LEE,)).fetchone()[0]
+    assert source == staff["Kevin Tran"]["contact_id"]
