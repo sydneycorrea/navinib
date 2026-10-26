@@ -56,22 +56,22 @@ TRIALS = [  # source = "trial"; status says whether the use is approved
 
 # Long-term memory: past call notes. source = "call_note".
 CALL_NOTES = [
-    ("N-0388", "lee", "Dr. Alicia Lee", "2026-08-12",
+    ("N-0388", "p-001", "Dr. Alicia Lee", "2026-08-12",
      "Met Dr. Lee at Riverside Oncology Associates. She has three patients on Product X. "
      "Main concern is neutropenia in her older patients; one patient aged 74 had a Grade 3 "
      "episode in week 4. Asked whether there is a simple dose-reduction reference."),
-    ("N-0412", "lee", "Dr. Alicia Lee", "2026-09-23",
+    ("N-0412", "p-001", "Dr. Alicia Lee", "2026-09-23",
      "Follow-up with Dr. Lee. Left the dose-modification card. She said CBC monitoring "
      "every 2 weeks is hard for patients who travel far; asked how other practices manage it. "
      "Nurse navigator Maria Gomez coordinates labs and prefers visits after 2pm."),
-    ("N-0371", "leigh", "Dr. Samuel Leigh", "2026-09-30",
+    ("N-0371", "p-002", "Dr. Samuel Leigh", "2026-09-30",
      "Dr. Leigh at Northgate Cancer Center asked about first-line data for Product X and "
      "whether the Phase 2 first-line results will be published. Told him the first-line use "
      "is not approved and referred the question to Medical Information."),
-    ("N-0405", "smith", "Dr. Helen Smith", "2026-10-02",
+    ("N-0405", "p-003", "Dr. Helen Smith", "2026-10-02",
      "Dr. Smith is interested in liver function monitoring; one patient had ALT above 5x ULN. "
      "Reviewed section 5.2. Prefers short visits, 15 minutes maximum."),
-    ("N-0420", "okafor", "Dr. Daniel Okafor", "2026-10-07",
+    ("N-0420", "p-004", "Dr. Daniel Okafor", "2026-10-07",
      "Dr. Okafor has not prescribed Product X yet. Wants response-rate and duration data in "
      "previously treated patients. Busy clinic, best reached before 10am."),
 ]

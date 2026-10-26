@@ -26,7 +26,7 @@ STREETS = ["Maple Ave", "Ridge Rd", "Liberty St", "Summit Dr", "Penn Ave", "Ceda
            "Grove St", "Hilltop Rd", "Bridge St", "Orchard Way"]
 PRACTICE_WORDS = ["Brightwater", "Oak Hollow", "Stonebridge", "Clearview", "Fox Run",
                   "Willow Creek", "Highpoint", "Harborview", "Meadowbrook", "Silver Lake"]
-KINDS = [  # (kind, specialty, practice suffix, weight)
+KINDS = [  # (kind, specialty, affiliation suffix, weight)
     ("oncologist", "Medical Oncology", "Oncology Associates", 5),
     ("oncologist", "Hematology/Oncology", "Hematology Oncology", 4),
     ("community_practice", "Medical Oncology", "Community Cancer Care", 2),
@@ -34,27 +34,28 @@ KINDS = [  # (kind, specialty, practice suffix, weight)
     ("cancer_center", "Comprehensive Oncology", "Cancer Center", 1),
 ]
 
-# Fixed providers. ids match CALL_NOTES in rag/corpus.py where they appear there.
+# Fixed providers from the 2.1 and 3.1 stories. Ids are sequence numbers; they match
+# CALL_NOTES in rag/corpus.py, and generated providers continue the sequence.
 NAMED = [
-    # id, name, kind, specialty, practice, tier, open, close, lat, lon, product_x, alerts
-    ("lee", "Dr. Alicia Lee", "oncologist", "Hematology/Oncology", "Riverside Oncology Associates",
+    # provider_id, full_name, kind, specialty, affiliation, tier, open, close, lat, lon, product_x, alerts
+    ("p-001", "Dr. Alicia Lee", "oncologist", "Hematology/Oncology", "Riverside Oncology Associates",
      "A", 8 * 60, 17 * 60, 40.462, -79.975, 95, 7),
-    ("leigh", "Dr. Samuel Leigh", "oncologist", "Medical Oncology", "Northgate Cancer Center",
+    ("p-002", "Dr. Samuel Leigh", "oncologist", "Medical Oncology", "Northgate Cancer Center",
      "B", 8 * 60, 17 * 60, 40.505, -80.020, 12, 0),
-    ("smith", "Dr. Helen Smith", "oncologist", "Medical Oncology", "Eastside Oncology Group",
+    ("p-003", "Dr. Helen Smith", "oncologist", "Medical Oncology", "Eastside Oncology Group",
      "A", 9 * 60, 17 * 60, 40.455, -79.930, 41, 6),
-    ("okafor", "Dr. Daniel Okafor", "oncologist", "Hematology/Oncology", "Okafor Hematology Clinic",
+    ("p-004", "Dr. Daniel Okafor", "oncologist", "Hematology/Oncology", "Okafor Hematology Clinic",
      "B", 7 * 60 + 30, 16 * 60, 40.440, -80.005, 0, 0),
     # The 2.1 example: a high-priority center with an open alert that closes at 2:30.
-    ("hillcrest", "Hillcrest Cancer Center", "cancer_center", "Comprehensive Oncology",
+    ("p-005", "Hillcrest Cancer Center", "cancer_center", "Comprehensive Oncology",
      "Hillcrest Cancer Center", "A", 8 * 60, 14 * 60 + 30, 40.448, -79.950, 58, 9),
-    ("raman", "Dr. Priya Raman", "oncologist", "Hematology/Oncology", "Brightwater Hematology Group",
+    ("p-006", "Dr. Priya Raman", "oncologist", "Hematology/Oncology", "Brightwater Hematology Group",
      "B", 9 * 60, 17 * 60 + 30, 40.470, -79.900, 22, 0),
 ]
 
 # Last visits for the named providers, taken from the call notes.
-NAMED_VISITS = {"lee": ["2026-08-12", "2026-09-23"], "leigh": ["2026-09-30"],
-                "smith": ["2026-10-02"], "okafor": ["2026-10-07"]}
+NAMED_VISITS = {"p-001": ["2026-08-12", "2026-09-23"], "p-002": ["2026-09-30"],
+                "p-003": ["2026-10-02"], "p-004": ["2026-10-07"]}
 
 REP = ("rep-01", "Jordan Rivera", "Pittsburgh North", "mgr-01", 40.452, -79.985)
 MANAGER = ("mgr-01", "Morgan Ellison", "Mid-Atlantic")
@@ -65,10 +66,10 @@ def _demo_schedule(rep_id: str) -> list[tuple]:
     d = config.DEMO_DATE
     return [
         ("ev-01", rep_id, d, 8 * 60, 8 * 60 + 30, "task", None, "Admin and expense report"),
-        ("ev-02", rep_id, d, 8 * 60 + 45, 9 * 60 + 30, "call", "okafor", "Call: Dr. Daniel Okafor"),
+        ("ev-02", rep_id, d, 8 * 60 + 45, 9 * 60 + 30, "call", "p-004", "Call: Dr. Daniel Okafor"),
         ("ev-03", rep_id, d, 12 * 60, 13 * 60, "task", None, "Lunch"),
-        ("ev-04", rep_id, d, 14 * 60, 15 * 60 + 30, "call", "smith", "Call: Dr. Helen Smith"),
-        ("ev-05", rep_id, d, 16 * 60 + 30, 17 * 60, "call", "raman", "Call: Dr. Priya Raman"),
+        ("ev-04", rep_id, d, 14 * 60, 15 * 60 + 30, "call", "p-003", "Call: Dr. Helen Smith"),
+        ("ev-05", rep_id, d, 16 * 60 + 30, 17 * 60, "call", "p-006", "Call: Dr. Priya Raman"),
     ]
 
 
@@ -85,37 +86,35 @@ def generate(path: Path | str = config.DB_PATH, seed: int = config.SEED) -> Path
     rep_id = REP[0]
 
     providers, prescribing, alerts = [], [], []
-    for pid, name, kind, spec, practice, tier, o, c, lat, lon, px, al in NAMED:
+    for pid, full_name, kind, spec, affiliation, tier, o, c, lat, lon, px, al in NAMED:
         addr = f"{rng.randint(100, 2999)} {rng.choice(STREETS)}, Pittsburgh, PA"
-        providers.append((pid, name, kind, spec, practice, addr, lat, lon, tier, rep_id, o, c))
+        providers.append((pid, full_name, kind, spec, affiliation, addr, lat, lon, tier, rep_id, o, c))
         prescribing.append((pid, px, rng.randint(5, 60), rng.randint(0, 40)))
         alerts.append((pid, al))
 
     used_names = {p[1] for p in providers}
     weights = [k[3] for k in KINDS]
-    i = 0
     while len(providers) < config.N_PROVIDERS:
-        i += 1
         kind, spec, suffix, _ = rng.choices(KINDS, weights=weights)[0]
         place = rng.choice(PRACTICE_WORDS)
         if kind == "oncologist":
-            name = f"Dr. {rng.choice(FIRST)} {rng.choice(LAST)}"
-            if name in used_names:
+            full_name = f"Dr. {rng.choice(FIRST)} {rng.choice(LAST)}"
+            if full_name in used_names:
                 continue
         else:
-            name = f"{place} {suffix}"
-            if name in used_names:
+            full_name = f"{place} {suffix}"
+            if full_name in used_names:
                 continue
-        used_names.add(name)
-        pid = f"p-{i:03d}"
-        practice = name if kind != "oncologist" else f"{place} {suffix}"
+        used_names.add(full_name)
+        pid = f"p-{len(providers) + 1:03d}"
+        affiliation = full_name if kind != "oncologist" else f"{place} {suffix}"
         addr = f"{rng.randint(100, 2999)} {rng.choice(STREETS)}, Pittsburgh, PA"
         lat = round(rng.uniform(*LAT_RANGE), 4)
         lon = round(rng.uniform(*LON_RANGE), 4)
         tier = rng.choices("ABC", weights=[2, 3, 3])[0]
         open_min = rng.choice([7 * 60 + 30, 8 * 60, 9 * 60])
         close_min = rng.choice([14 * 60 + 30, 16 * 60, 17 * 60, 17 * 60, 18 * 60])
-        providers.append((pid, name, kind, spec, practice, addr, lat, lon, tier, rep_id,
+        providers.append((pid, full_name, kind, spec, affiliation, addr, lat, lon, tier, rep_id,
                           open_min, close_min))
         scale = {"A": 60, "B": 30, "C": 12}[tier]
         prescribing.append((pid, rng.randint(0, scale), rng.randint(0, scale), rng.randint(0, scale)))
@@ -131,14 +130,14 @@ def generate(path: Path | str = config.DB_PATH, seed: int = config.SEED) -> Path
     for pid, dates in NAMED_VISITS.items():
         visits += [(pid, d, "completed") for d in dates]
     for p in providers:
-        if p[0] in NAMED_VISITS or p[0] in ("hillcrest", "raman"):
+        if p[0] in NAMED_VISITS or p[0] in ("p-005", "p-006"):
             continue
         for _ in range(rng.randint(0, 4)):
             d = demo - timedelta(days=rng.randint(3, 90))
             outcome = rng.choices(["completed", "cancelled", "rescheduled"], weights=[8, 1, 1])[0]
             visits.append((p[0], d.isoformat(), outcome))
-    visits += [("hillcrest", (demo - timedelta(days=41)).isoformat(), "completed"),
-               ("raman", (demo - timedelta(days=12)).isoformat(), "completed")]
+    visits += [("p-005", (demo - timedelta(days=41)).isoformat(), "completed"),
+               ("p-006", (demo - timedelta(days=12)).isoformat(), "completed")]
     visits.sort(key=lambda v: (v[1], v[0]))
     con.executemany("INSERT INTO visit VALUES (?, ?, ?, ?, ?)",
                     [(f"v-{n:04d}", pid, rep_id, d, o) for n, (pid, d, o) in enumerate(visits, 1)])

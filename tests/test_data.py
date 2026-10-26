@@ -23,6 +23,11 @@ def test_generation_is_reproducible(tmp_path):
     assert [tuple(r) for r in rows[0]] == [tuple(r) for r in rows[1]]
 
 
+def test_provider_ids_are_a_sequence(con):
+    ids = [r[0] for r in con.execute("SELECT provider_id FROM provider ORDER BY provider_id")]
+    assert ids == [f"p-{n:03d}" for n in range(1, config.N_PROVIDERS + 1)]
+
+
 def test_no_drug_brand_names(con):
-    names = " ".join(r[0] for r in con.execute("SELECT name || practice FROM provider"))
+    names = " ".join(r[0] for r in con.execute("SELECT full_name || affiliation FROM provider"))
     assert "Product X" not in names  # the only drug name in the project is the placeholder

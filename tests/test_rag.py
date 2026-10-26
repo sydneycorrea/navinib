@@ -13,8 +13,8 @@ def col(tmp_path_factory):
 
 
 def test_call_notes_stay_with_one_provider(col):
-    hits = retrieval.call_note_recall(col, "lee", "first-line results and neutropenia")
-    assert hits and all(h["meta"]["provider_id"] == "lee" for h in hits)
+    hits = retrieval.call_note_recall(col, "p-001", "first-line results and neutropenia")  # Dr. Lee
+    assert hits and all(h["meta"]["provider_id"] == "p-001" for h in hits)
 
 
 def test_label_lookup_returns_only_approved(col):

@@ -2,11 +2,13 @@ from navinib import config
 from navinib.tools import cancel_event, provider_lookup, provider_scoring, schedule_lookup
 from navinib.tools.providers import alert_display
 
+LEE, SMITH, HILLCREST = "p-001", "p-003", "p-005"   # fixed providers in data/generate.py
+
 
 def test_demo_day_has_the_2pm_call(con):
     day = schedule_lookup(con, "rep-01", config.DEMO_DATE)
     two_pm = [e for e in day["events"] if e["start"] == "14:00"]
-    assert two_pm and two_pm[0]["provider_id"] == "smith"
+    assert two_pm and two_pm[0]["provider_id"] == SMITH
 
 
 def test_cancel_marks_event(con):
@@ -18,9 +20,9 @@ def test_cancel_marks_event(con):
 def test_lookup_filters_window_and_exclusions(con):
     # 2:00 to 3:30 window from the 2.1 example: Hillcrest closes at 2:30, so it must drop out.
     found = provider_lookup(con, "rep-01", near=(40.455, -79.930), max_drive_min=20,
-                            open_from=14 * 60, open_until=15 * 60 + 30, exclude={"smith"})
+                            open_from=14 * 60, open_until=15 * 60 + 30, exclude={SMITH})
     ids = {p["provider_id"] for p in found}
-    assert "smith" not in ids and "hillcrest" not in ids
+    assert SMITH not in ids and HILLCREST not in ids
     assert all(p["drive_min"] <= 20 for p in found)
 
 
@@ -42,6 +44,6 @@ def test_alert_counts_are_suppressed():
 def test_checkpoint_2_1_story_ranking(con):
     # Near Dr. Smith's office after her 2pm cancels: Hillcrest ranks first (it closes at 2:30,
     # which the route optimizer will catch), and Dr. Lee is the feasible runner-up.
-    near = provider_lookup(con, "rep-01", near=(40.455, -79.930), max_drive_min=20, exclude={"smith"})
+    near = provider_lookup(con, "rep-01", near=(40.455, -79.930), max_drive_min=20, exclude={SMITH})
     top = [p["provider_id"] for p in provider_scoring(con, near, config.DEMO_DATE)[:2]]
-    assert top == ["hillcrest", "lee"]
+    assert top == [HILLCREST, LEE]

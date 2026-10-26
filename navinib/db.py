@@ -19,11 +19,11 @@ CREATE TABLE IF NOT EXISTS rep (
     home_lon   REAL NOT NULL
 );
 CREATE TABLE IF NOT EXISTS provider (
-    provider_id   TEXT PRIMARY KEY,
-    name          TEXT NOT NULL,          -- fictional
+    provider_id   TEXT PRIMARY KEY,       -- sequence number, e.g. p-001
+    full_name     TEXT NOT NULL,          -- fictional
     kind          TEXT NOT NULL,          -- oncologist | cancer_center | infusion_center | community_practice
     specialty     TEXT NOT NULL,
-    practice      TEXT NOT NULL,
+    affiliation   TEXT NOT NULL,          -- practice, hospital or cancer center
     address       TEXT NOT NULL,
     lat           REAL NOT NULL,
     lon           REAL NOT NULL,

@@ -110,9 +110,9 @@ if __name__ == "__main__":
     col = build_index(sys.argv[1] if len(sys.argv) > 1 else CHROMA_PATH)
     print(f"Indexed {col.count()} chunks\n")
 
-    print("=== Action 4: build the brief for the substitute, Dr. Alicia Lee (provider_id=lee) ===")
-    notes = call_note_recall(col, "lee", "neutropenia concerns, dose reduction and lab monitoring")
-    show("Tool: Call-note recall (filter provider_id=lee, k=2)", notes)
+    print("=== Action 4: build the brief for the substitute, Dr. Alicia Lee (provider_id=p-001) ===")
+    notes = call_note_recall(col, "p-001", "neutropenia concerns, dose reduction and lab monitoring")
+    show("Tool: Call-note recall (filter provider_id=p-001, k=2)", notes)
     q = "neutropenia in older patients, dose reduction and CBC monitoring"
     label = label_lookup(col, q)
     show(f"Tool: Label lookup (filter status=approved, k=3, MMR) query='{q}'", label)
@@ -134,7 +134,7 @@ if __name__ == "__main__":
 
     print("\n=== Same request through the filtered tools ===")
     q2 = "Dr. Lee wants data on Product X neutropenia and first-line results"
-    show("Call-note recall (provider_id=lee)", call_note_recall(col, "lee", q2))
+    show("Call-note recall (provider_id=p-001)", call_note_recall(col, "p-001", q2))
     show("Label lookup (status=approved)", label_lookup(col, q2))
 
     print("\n=== Out-of-scope check: question the store cannot answer ===")
