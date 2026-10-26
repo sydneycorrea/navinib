@@ -23,14 +23,23 @@ CREATE TABLE IF NOT EXISTS provider (
     full_name     TEXT NOT NULL,          -- fictional
     kind          TEXT NOT NULL,          -- oncologist | cancer_center | infusion_center | community_practice
     specialty     TEXT NOT NULL,
+    tier          TEXT NOT NULL CHECK (tier IN ('A', 'B', 'C')),
+    rep_id        TEXT NOT NULL REFERENCES rep(rep_id)
+);
+CREATE TABLE IF NOT EXISTS location (       -- a provider can practice at more than one place
+    location_id   TEXT PRIMARY KEY,       -- sequence number, e.g. L-001
+    provider_id   TEXT NOT NULL REFERENCES provider(provider_id),
     affiliation   TEXT NOT NULL,          -- practice, hospital or cancer center
     address       TEXT NOT NULL,
     lat           REAL NOT NULL,
-    lon           REAL NOT NULL,
-    tier          TEXT NOT NULL CHECK (tier IN ('A', 'B', 'C')),
-    rep_id        TEXT NOT NULL REFERENCES rep(rep_id),
-    open_min      INTEGER NOT NULL,       -- office hours, minutes after midnight, Mon-Fri
-    close_min     INTEGER NOT NULL
+    lon           REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS location_hours ( -- office hours per weekday; no row = not there that day
+    location_id   TEXT NOT NULL REFERENCES location(location_id),
+    weekday       INTEGER NOT NULL CHECK (weekday BETWEEN 0 AND 6),  -- 0 = Monday
+    open_min      INTEGER NOT NULL,       -- minutes after midnight
+    close_min     INTEGER NOT NULL,
+    PRIMARY KEY (location_id, weekday)
 );
 CREATE TABLE IF NOT EXISTS prescribing (
     provider_id      TEXT PRIMARY KEY REFERENCES provider(provider_id),
@@ -57,6 +66,7 @@ CREATE TABLE IF NOT EXISTS schedule_event (
     end_min     INTEGER NOT NULL,
     kind        TEXT NOT NULL CHECK (kind IN ('call', 'task')),
     provider_id TEXT REFERENCES provider(provider_id),
+    location_id TEXT REFERENCES location(location_id),
     title       TEXT NOT NULL,
     status      TEXT NOT NULL DEFAULT 'planned'  -- planned | cancelled | completed
 );

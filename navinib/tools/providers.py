@@ -27,11 +27,21 @@ def alert_display(count: int) -> str:
     return f"<{config.ALERT_SUPPRESS_BELOW}" if count < config.ALERT_SUPPRESS_BELOW else str(count)
 
 
-def provider_lookup(con: sqlite3.Connection, rep_id: str, near: tuple[float, float] | None = None,
-                    max_drive_min: int | None = None, open_from: int | None = None,
-                    open_until: int | None = None, exclude: set[str] | frozenset = frozenset()) -> list[dict]:
-    """Providers in the rep's territory, optionally within a drive time and open across a window."""
-    rows = con.execute("SELECT * FROM provider WHERE rep_id = ?", (rep_id,)).fetchall()
+def provider_lookup(con: sqlite3.Connection, rep_id: str, day: str,
+                    near: tuple[float, float] | None = None, max_drive_min: int | None = None,
+                    open_from: int | None = None, open_until: int | None = None,
+                    exclude: set[str] | frozenset = frozenset()) -> list[dict]:
+    """Provider locations open on `day`, optionally within a drive time and open across a window.
+
+    Returns one row per location, so a provider who practices at two places that day
+    appears twice, each with that location's hours.
+    """
+    weekday = date.fromisoformat(day).weekday()
+    rows = con.execute(
+        "SELECT p.*, l.location_id, l.affiliation, l.address, l.lat, l.lon, h.open_min, h.close_min"
+        " FROM provider p JOIN location l USING (provider_id)"
+        " JOIN location_hours h ON h.location_id = l.location_id AND h.weekday = ?"
+        " WHERE p.rep_id = ? ORDER BY l.location_id", (weekday, rep_id)).fetchall()
     out = []
     for r in rows:
         if r["provider_id"] in exclude:

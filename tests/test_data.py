@@ -29,5 +29,5 @@ def test_provider_ids_are_a_sequence(con):
 
 
 def test_no_drug_brand_names(con):
-    names = " ".join(r[0] for r in con.execute("SELECT full_name || affiliation FROM provider"))
+    names = " ".join(r[0] for r in con.execute("SELECT full_name || affiliation FROM provider JOIN location USING (provider_id)"))
     assert "Product X" not in names  # the only drug name in the project is the placeholder

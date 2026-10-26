@@ -28,8 +28,9 @@ Phase 1 of the MVP plan (Oct 27 to Nov 2): synthetic data, SQLite, the first too
 ```
 navinib/
   config.py            settings, scoring weights, demo date
-  db.py                SQLite schema
+  db.py                SQLite schema (providers, their locations and weekday hours, visits, schedule)
   data/generate.py     seeded synthetic world (rep, 40 providers, visits, demo-day schedule)
+                       Dr. Leigh (p-002) works at two locations on different days
   tools/               specialist tools the planner calls
     schedule.py        schedule lookup, cancel a call
     providers.py       provider lookup, scoring with explanations
