@@ -218,3 +218,8 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Navinib generated files
+data/*.db
+data/csv/
+chroma_db/

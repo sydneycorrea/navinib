@@ -1,0 +1,11 @@
+# Phase 1: data, tools and retrieval
+chromadb>=1.0
+numpy>=1.26
+pytest>=8.0
+
+# Added in later phases (kept here so the plan is visible):
+# langgraph          # ReAct planner (phase 2)
+# langchain-openai   # OpenRouter client, OpenAI-compatible (phase 2)
+# ortools            # route optimizer with time windows (phase 1, next PR)
+# streamlit          # rep app and manager view (phase 4)
+# streamlit-folium   # day map (phase 4)
