@@ -6,8 +6,11 @@ writes the final one-page brief (phase 2) may only use what is collected here.
 """
 import sqlite3
 
+from navinib.log import get_logger
 from navinib.rag import retrieval
 from navinib.tools.providers import alert_display, location_contacts, provider_lookup
+
+log = get_logger("navinib.tools.brief")
 
 def build_brief(con: sqlite3.Connection, col, provider_id: str, day: str, rep_id: str = "rep-01",
                 topic: str | None = None) -> dict:
@@ -37,6 +40,11 @@ def build_brief(con: sqlite3.Connection, col, provider_id: str, day: str, rep_id
     do_not_raise += [{"ref": p["pub_id"], "why": "their publication covers an unapproved use"}
                      for p in publications if not p["may_discuss"]]
 
+    log.info("build_brief %s day=%s topic=%s -> %d notes, %d publications, %d talking points, %d do-not-raise",
+             provider_id, day, topic or "-", len(notes), len(publications), len(talking_points), len(do_not_raise))
+    log.debug("  sources: notes=%s pubs=%s label=%s do_not_raise=%s", [n["id"] for n in notes],
+              [p["pub_id"] for p in publications], [t["meta"]["ref"] for t in talking_points],
+              [d["ref"] for d in do_not_raise])
     return {
         "provider_id": provider_id,
         "full_name": provider["full_name"],
@@ -87,6 +95,9 @@ if __name__ == "__main__":
 
     from navinib import config
     from navinib.db import connect
+    from navinib.log import setup_logging
+
+    setup_logging()
 
     pid = sys.argv[1] if len(sys.argv) > 1 else "p-001"
     print(render_brief(build_brief(connect(), retrieval.build_index(), pid, config.DEMO_DATE)))

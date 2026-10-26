@@ -14,7 +14,10 @@ from pathlib import Path
 
 from navinib import config
 from navinib.db import connect, create_schema
+from navinib.log import get_logger
 from navinib.rag.corpus import PUBLICATIONS
+
+log = get_logger("navinib.data.generate")
 
 LAT_RANGE, LON_RANGE = (40.38, 40.52), (-80.10, -79.88)
 
@@ -196,9 +199,14 @@ def generate(path: Path | str = config.DB_PATH, seed: int = config.SEED) -> Path
         " location_id, title) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", _demo_schedule(rep_id))
     con.commit()
     con.close()
+    log.info("generate seed=%d -> %d providers, %d locations, %d contacts, %d calls, %d schedule events: %s",
+             seed, len(providers), len(locations), len(CONTACTS), len(visits), len(_demo_schedule(rep_id)), path)
     return path
 
 
 if __name__ == "__main__":
+    from navinib.log import setup_logging
+
+    setup_logging()
     out = generate()
     print(f"Wrote synthetic world to {out}")

@@ -18,7 +18,10 @@ import numpy as np
 from chromadb.utils import embedding_functions
 
 from navinib.config import CHROMA_PATH
+from navinib.log import get_logger
 from navinib.rag.corpus import CALL_NOTES, LABEL, PUBLICATIONS, TRIALS
+
+log = get_logger("navinib.rag.retrieval")
 
 CHUNK_WORDS, OVERLAP_WORDS = 300, 50   # ~400 tokens with 50-word overlap
 MIN_SIM = 0.30                          # below this, treat as "not found"
@@ -63,6 +66,7 @@ def build_index(path=CHROMA_PATH):
             metas.append({"source": "publication", "provider_id": pid, "status": use_status,
                           "year": year, "ref": pub_id})
     col.add(ids=ids, documents=docs, metadatas=metas)
+    log.info("build_index %d chunks -> %s", len(ids), path)
     return col
 
 
@@ -81,6 +85,8 @@ def _search(col, query, where, k, fetch_k=8, lam=0.7):
         best = max(cands, key=score)
         chosen.append(best)
         cands.remove(best)
+    log.info("search where=%s k=%d query=%r -> %s", where, k, query[:60],
+             [f"{r['ids'][0][i]} {sims[i]:.2f}" for i in chosen] or "not found")
     return [{"id": r["ids"][0][i], "sim": round(sims[i], 3), "meta": r["metadatas"][0][i],
              "text": r["documents"][0][i]} for i in chosen]
 
@@ -127,6 +133,9 @@ def show(title, hits):
 
 
 if __name__ == "__main__":
+    from navinib.log import setup_logging
+
+    setup_logging()
     col = build_index(sys.argv[1] if len(sys.argv) > 1 else CHROMA_PATH)
     print(f"Indexed {col.count()} chunks\n")
 

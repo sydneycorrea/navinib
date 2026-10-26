@@ -10,10 +10,13 @@ feasible plan or says why each candidate was left out; it never guesses.
 from ortools.constraint_solver import pywrapcp, routing_enums_pb2
 
 from navinib import config
+from navinib.log import get_logger
 from navinib.tools.drive import DriveTimes
 from navinib.tools.schedule import hhmm
 
 DAY_START, DAY_END = 8 * 60, 17 * 60 + 30
+
+log = get_logger("navinib.tools.route")
 
 
 def free_windows(day: dict, now_min: int | None = None, buffer_min: int = config.PREP_BUFFER_MIN,
@@ -35,6 +38,8 @@ def free_windows(day: dict, now_min: int | None = None, buffer_min: int = config
             cursor = max(cursor, e["end_min"])
             if e["kind"] == "call" and e.get("location_id"):
                 last_location = e["location_id"]
+    log.info("free_windows now=%s buffer=%d -> %s", hhmm(now_min) if now_min is not None else "-", buffer_min,
+             ", ".join(f"{w['start']}-{w['end']}" for w in windows) or "none")
     return windows
 
 
@@ -48,6 +53,8 @@ def plan_route(start: dict, start_min: int, end_min: int, candidates: list[dict]
     visit that is planned always fits its office hours.
     """
     drive = drive or DriveTimes()
+    log.info("plan_route from %s, window %s-%s, %d candidates, max_visits=%s", start["id"], hhmm(start_min),
+             hhmm(end_min), len(candidates), max_visits)
     pts = [start] + [{"id": c["location_id"], "lat": c["lat"], "lon": c["lon"]} for c in candidates]
 
     # Rule out what can't work on its own first, so every drop has a plain reason.
@@ -70,6 +77,13 @@ def plan_route(start: dict, start_min: int, end_min: int, candidates: list[dict]
                                         max_visits)
         dropped += [{**_brief(candidates[i - 1]), "reason": "fits on its own, but higher-priority visits "
                                                             "used the time"} for i in solver_dropped]
+    for v in visits:
+        log.info("  planned %s at %s %s-%s (%d min drive)", v["full_name"], v["location_id"], v["start"],
+                 v["end"], v["drive_min"])
+    for d in dropped:
+        log.info("  dropped %s at %s: %s", d["full_name"], d["location_id"], d["reason"])
+    if not visits:
+        log.warning("plan_route: no feasible visit in %s-%s", hhmm(start_min), hhmm(end_min))
     return {"feasible": bool(visits), "window": {"start": hhmm(start_min), "end": hhmm(end_min)},
             "visits": visits, "dropped": dropped, "drive_source": drive.source}
 
@@ -140,6 +154,9 @@ if __name__ == "__main__":
     from navinib.tools.providers import provider_lookup, provider_scoring
     from navinib.tools.schedule import cancel_event, schedule_lookup
 
+    from navinib.log import setup_logging
+
+    setup_logging()
     con = connect()
     cancel_event(con, "ev-04")
     window = free_windows(schedule_lookup(con, "rep-01", config.DEMO_DATE), now_min=14 * 60)[0]

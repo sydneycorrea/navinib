@@ -29,6 +29,7 @@ Phase 1 of the MVP plan (Oct 27 to Nov 2): synthetic data, SQLite, the first too
 ```
 navinib/
   config.py            settings, scoring weights, demo date
+  log.py               logging setup (logs/navinib.log, --verbose)
   db.py                SQLite schema (providers, their locations and weekday hours, visits, schedule)
   data/export_csv.py   CSV export for reviewing the data in a spreadsheet
   data/generate.py     seeded synthetic world (rep, 40 providers, visits, demo-day schedule)
@@ -65,6 +66,16 @@ pytest                           # runs the tests
 ```
 
 The first retrieval run downloads the free all-MiniLM-L6-v2 embedding model (about 80 MB).
+
+## Logs
+
+Every tool logs what it was asked and what it returned. Each run appends to `logs/navinib.log` (full detail, never committed). The terminal shows only warnings unless you add `--verbose`:
+
+```bash
+python -m navinib.tools.route --verbose
+```
+
+A run of the replan demo logs the cancellation, the open window, the provider lookup and ranking, the drive-time source, and each planned or dropped visit with its reason.
 
 ## Demo day
 

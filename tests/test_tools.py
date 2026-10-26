@@ -83,3 +83,13 @@ def test_phone_call_is_half_a_call_and_not_a_visit(con):
                                  if p["provider_id"] == LEE], config.DEMO_DATE)[0]
     assert "0.5 of 4 tier-A calls done this month" in lee["reasons"]
     assert "last in-person visit 34 days ago" in lee["reasons"]
+
+
+def test_tool_calls_are_logged(con, caplog):
+    import logging
+    with caplog.at_level(logging.INFO, logger="navinib"):
+        provider_lookup(con, "rep-01", config.DEMO_DATE, exclude={SMITH})
+        cancel_event(con, "ev-04")
+    text = caplog.text
+    assert "provider_lookup day=2026-10-27" in text and "exclude=['p-003']" in text
+    assert "cancel_event ev-04 -> cancelled" in text
