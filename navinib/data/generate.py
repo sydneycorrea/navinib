@@ -78,8 +78,8 @@ CONTACTS = [
 ]
 LAB_ALERT_SOURCES = {"p-001": "c-001"}
 
-# Phone calls for the story providers. They are logged in call history but don't
-# count toward in-person call goals or visit recency.
+# Phone calls for the story providers. Each counts as half a call toward the monthly
+# goal but doesn't reset visit recency.
 NAMED_PHONE_CALLS = {"p-004": ["2026-10-16"], "p-001": ["2026-10-14"]}
 
 # Last visits for the named providers, taken from the call notes.

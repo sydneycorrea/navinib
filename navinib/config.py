@@ -22,6 +22,7 @@ SCORE_WEIGHTS = {
     "recency": 0.15,       # days since the last visit
 }
 CALL_GOALS = {"A": 4, "B": 2, "C": 1}   # calls per month by tier
+CALL_CREDIT = {"face_to_face": 1.0, "phone": 0.5}   # how much each completed call counts toward goals
 RECENCY_CAP_DAYS = 60                    # 60+ days since a visit scores as fully overdue
 
 # Lab alerts show provider-level counts only; small counts are suppressed so a

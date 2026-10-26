@@ -74,10 +74,12 @@ def test_lab_tech_is_a_contact_not_a_call_target(con):
     assert source == staff["Kevin Tran"]["contact_id"]
 
 
-def test_phone_calls_dont_count_as_visits(con):
+def test_phone_call_is_half_a_call_and_not_a_visit(con):
     types = {r[0] for r in con.execute("SELECT DISTINCT call_type FROM visit")}
     assert types == {"face_to_face", "phone"}
-    # Dr. Lee had a phone call on Oct 14, but her last in-person visit was Sep 23 (34 days).
+    # Dr. Lee's only October call is the Oct 14 phone call: half a call toward her goal of 4,
+    # and her last in-person visit is still Sep 23 (34 days).
     lee = provider_scoring(con, [p for p in provider_lookup(con, "rep-01", config.DEMO_DATE)
                                  if p["provider_id"] == LEE], config.DEMO_DATE)[0]
+    assert "0.5 of 4 tier-A calls done this month" in lee["reasons"]
     assert "last in-person visit 34 days ago" in lee["reasons"]
