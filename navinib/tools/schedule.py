@@ -15,7 +15,7 @@ def schedule_lookup(con: sqlite3.Connection, rep_id: str, day: str) -> dict:
         (rep_id, day)).fetchall()
     events = [{
         "event_id": r["event_id"], "kind": r["kind"], "title": r["title"],
-        "provider_id": r["provider_id"], "status": r["status"],
+        "provider_id": r["provider_id"], "location_id": r["location_id"], "status": r["status"],
         "start_min": r["start_min"], "end_min": r["end_min"],
         "start": hhmm(r["start_min"]), "end": hhmm(r["end_min"]),
     } for r in rows]

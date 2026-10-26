@@ -28,3 +28,7 @@ RECENCY_CAP_DAYS = 60                    # 60+ days since a visit scores as full
 # Lab alerts show provider-level counts only; small counts are suppressed so a
 # count can never point to an individual patient.
 ALERT_SUPPRESS_BELOW = 5
+
+# Route planning
+VISIT_MIN = 30          # default length of an in-person call
+PREP_BUFFER_MIN = 60    # time kept free before a booked call to prep and drive (Checkpoint 2.1)
