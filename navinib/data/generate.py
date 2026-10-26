@@ -169,6 +169,8 @@ def generate(path: Path | str = config.DB_PATH, seed: int = config.SEED) -> Path
             continue
         for _ in range(rng.randint(0, 4)):
             d = demo - timedelta(days=rng.randint(3, 90))
+            if d.weekday() >= 5:          # reps don't call on weekends
+                d -= timedelta(days=d.weekday() - 4)
             outcome = rng.choices(["completed", "cancelled", "rescheduled"], weights=[8, 1, 1])[0]
             visits.append((p[0], d.isoformat(), outcome))
     visits += [("p-005", (demo - timedelta(days=41)).isoformat(), "completed"),

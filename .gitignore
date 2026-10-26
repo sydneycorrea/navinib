@@ -221,4 +221,5 @@ __marimo__/
 
 # Navinib generated files
 data/*.db
+data/csv/
 chroma_db/

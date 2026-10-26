@@ -31,3 +31,10 @@ def test_provider_ids_are_a_sequence(con):
 def test_no_drug_brand_names(con):
     names = " ".join(r[0] for r in con.execute("SELECT full_name || affiliation FROM provider JOIN location USING (provider_id)"))
     assert "Product X" not in names  # the only drug name in the project is the placeholder
+
+
+def test_csv_export(tmp_path):
+    from navinib.data.export_csv import export
+    out = export(tmp_path / "csv", generate(tmp_path / "x.db"))
+    assert {p.name for p in out.iterdir()} == {"providers.csv", "contacts.csv", "call_history.csv",
+                                               "demo_day_schedule.csv", "call_notes.csv"}

@@ -29,6 +29,7 @@ Phase 1 of the MVP plan (Oct 27 to Nov 2): synthetic data, SQLite, the first too
 navinib/
   config.py            settings, scoring weights, demo date
   db.py                SQLite schema (providers, their locations and weekday hours, visits, schedule)
+  data/export_csv.py   CSV export for reviewing the data in a spreadsheet
   data/generate.py     seeded synthetic world (rep, 40 providers, visits, demo-day schedule)
                        Dr. Leigh (p-002) works at two locations on different days;
                        lab tech Kevin Tran (c-001) is a non-prescribing contact at L-001
@@ -51,6 +52,7 @@ source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 
 python -m navinib.data.generate  # writes data/navinib.db
+python -m navinib.data.export_csv  # optional: CSVs for review in data/csv/
 python -m navinib.rag.retrieval  # Checkpoint 3.1 retrieval demo
 pytest                           # runs the tests
 ```
