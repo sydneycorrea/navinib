@@ -1,12 +1,18 @@
 """Schedule lookup (Action 1 in Checkpoint 2.1): today's calls, fixed tasks and where the rep is."""
 import sqlite3
 
+from navinib.log import get_logger
+
+log = get_logger("navinib.tools.schedule")
+
 
 def hhmm(minutes: int) -> str:
+    """Turn minutes after midnight into 'HH:MM' (e.g. 870 -> '14:30')."""
     return f"{minutes // 60:02d}:{minutes % 60:02d}"
 
 
 def schedule_lookup(con: sqlite3.Connection, rep_id: str, day: str) -> dict:
+    """The rep's events for one day, in time order, plus where the rep starts (Action 1)."""
     rep = con.execute("SELECT * FROM rep WHERE rep_id = ?", (rep_id,)).fetchone()
     if rep is None:
         raise ValueError(f"unknown rep {rep_id!r}")
@@ -15,10 +21,14 @@ def schedule_lookup(con: sqlite3.Connection, rep_id: str, day: str) -> dict:
         (rep_id, day)).fetchall()
     events = [{
         "event_id": r["event_id"], "kind": r["kind"], "title": r["title"],
-        "provider_id": r["provider_id"], "status": r["status"],
+        "provider_id": r["provider_id"], "location_id": r["location_id"], "status": r["status"],
         "start_min": r["start_min"], "end_min": r["end_min"],
         "start": hhmm(r["start_min"]), "end": hhmm(r["end_min"]),
     } for r in rows]
+    cancelled = sum(e["status"] == "cancelled" for e in events)
+    log.info("schedule_lookup rep=%s day=%s -> %d events (%d cancelled)", rep_id, day, len(events), cancelled)
+    for e in events:
+        log.debug("  %s %s-%s %s [%s]", e["event_id"], e["start"], e["end"], e["title"], e["status"])
     # Until live location exists, the rep starts the day at home.
     return {"rep_id": rep_id, "date": day, "events": events,
             "location": {"lat": rep["home_lat"], "lon": rep["home_lon"]}}
@@ -30,3 +40,4 @@ def cancel_event(con: sqlite3.Connection, event_id: str) -> None:
     if cur.rowcount == 0:
         raise ValueError(f"unknown event {event_id!r}")
     con.commit()
+    log.info("cancel_event %s -> cancelled", event_id)

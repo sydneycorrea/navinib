@@ -16,7 +16,7 @@ Phase 1 of the MVP plan (Oct 27 to Nov 2): synthetic data, SQLite, the first too
 | Schedule lookup, provider lookup, provider scoring | Done |
 | Retrieval for pre-call briefs (Chroma + all-MiniLM-L6-v2) | Done (ported from 3.1) |
 | Pre-call brief inputs: notes, publications, label points, do-not-raise list, contacts | Done (LLM write-up in phase 2) |
-| Route optimizer (OR-Tools, time windows) | Next |
+| Route optimizer (OR-Tools, time windows) + drive-time cache | Done |
 | Tree-of-Thought replan | Phase 1 |
 | ReAct planner (LangGraph + free OpenRouter model) | Phase 2 |
 | Multi-agent split | Phase 2 (Module 5) |
@@ -29,6 +29,7 @@ Phase 1 of the MVP plan (Oct 27 to Nov 2): synthetic data, SQLite, the first too
 ```
 navinib/
   config.py            settings, scoring weights, demo date
+  log.py               logging setup (logs/navinib.log, --verbose)
   db.py                SQLite schema (providers, their locations and weekday hours, visits, schedule)
   data/export_csv.py   CSV export for reviewing the data in a spreadsheet
   data/generate.py     seeded synthetic world (rep, 40 providers, visits, demo-day schedule)
@@ -38,6 +39,8 @@ navinib/
     schedule.py        schedule lookup, cancel a call
     providers.py       provider lookup, scoring with explanations, location contacts
     brief.py           pre-call brief inputs, each with its source id
+    route.py           free windows in the day, OR-Tools route with office-hour windows
+    drive.py           drive-time cache (OSRM road times, straight-line fallback)
   rag/                 retrieval for pre-call briefs
     corpus.py          fictional Product X label, trials, call notes, provider publications
     retrieval.py       label lookup, trial search, call-note recall, publication search
@@ -57,14 +60,28 @@ python -m navinib.data.generate  # writes data/navinib.db
 python -m navinib.data.export_csv  # optional: CSVs for review in data/csv/
 python -m navinib.rag.retrieval  # Checkpoint 3.1 retrieval demo
 python -m navinib.tools.brief p-001  # pre-call brief for Dr. Lee
+python -m navinib.tools.drive    # optional, needs internet: cache real road times from OSRM
+python -m navinib.tools.route    # the 2.1 replan: 2pm cancels, who fits?
 pytest                           # runs the tests
 ```
 
 The first retrieval run downloads the free all-MiniLM-L6-v2 embedding model (about 80 MB).
 
+## Logs
+
+Every tool logs what it was asked and what it returned. Each run appends to `logs/navinib.log` (full detail, never committed). The terminal shows only warnings unless you add `--verbose`:
+
+```bash
+python -m navinib.tools.route --verbose
+```
+
+A run of the replan demo logs the cancellation, the open window, the provider lookup and ranking, the drive-time source, and each planned or dropped visit with its reason.
+
 ## Demo day
 
-The scripted demo day (`2026-10-27`) follows the Checkpoint 2.1 example: the rep's 2:00 call with Dr. Helen Smith cancels. Provider scoring ranks Hillcrest Cancer Center first, but it closes at 2:30, so the next candidate, Dr. Alicia Lee, fills the slot and gets a brief from the retrieval layer.
+The scripted demo day (`2026-10-27`) follows the Checkpoint 2.1 example: the rep's 2:00 call with Dr. Helen Smith cancels. Provider scoring ranks Hillcrest Cancer Center first, but the route optimizer finds it closes at 2:30 before a 30-minute visit can finish, so the next candidate, Dr. Alicia Lee, fills the slot and gets a brief from the retrieval layer.
+
+Drive times use a straight-line estimate until you run `python -m navinib.tools.drive` once with internet access; that saves real road times from the free OSRM service to `data/drive_times.json`, which you can commit so the demo works offline.
 
 ## License
 

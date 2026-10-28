@@ -18,7 +18,10 @@ import numpy as np
 from chromadb.utils import embedding_functions
 
 from navinib.config import CHROMA_PATH
+from navinib.log import get_logger
 from navinib.rag.corpus import CALL_NOTES, LABEL, PUBLICATIONS, TRIALS
+
+log = get_logger("navinib.rag.retrieval")
 
 CHUNK_WORDS, OVERLAP_WORDS = 300, 50   # ~400 tokens with 50-word overlap
 MIN_SIM = 0.30                          # below this, treat as "not found"
@@ -34,6 +37,10 @@ def chunk(text, size=CHUNK_WORDS, overlap=OVERLAP_WORDS):
 
 
 def build_index(path=CHROMA_PATH):
+    """Embed the label, trials, call notes and publications into a fresh Chroma collection.
+
+    Each chunk carries metadata (source, status, provider_id) that the searches below filter on.
+    """
     client = chromadb.PersistentClient(path=str(path))
     ef = embedding_functions.DefaultEmbeddingFunction()  # all-MiniLM-L6-v2
     try:
@@ -63,6 +70,7 @@ def build_index(path=CHROMA_PATH):
             metas.append({"source": "publication", "provider_id": pid, "status": use_status,
                           "year": year, "ref": pub_id})
     col.add(ids=ids, documents=docs, metadatas=metas)
+    log.info("build_index %d chunks -> %s", len(ids), path)
     return col
 
 
@@ -76,20 +84,25 @@ def _search(col, query, where, k, fetch_k=8, lam=0.7):
     chosen = []
     while cands and len(chosen) < k:   # MMR (Lab 3.2)
         def score(i):
+            """MMR score: relevance to the query minus overlap with what's already chosen."""
             red = max((float(embs[i] @ embs[j]) for j in chosen), default=0.0)
             return lam * sims[i] - (1 - lam) * red
         best = max(cands, key=score)
         chosen.append(best)
         cands.remove(best)
+    log.info("search where=%s k=%d query=%r -> %s", where, k, query[:60],
+             [f"{r['ids'][0][i]} {sims[i]:.2f}" for i in chosen] or "not found")
     return [{"id": r["ids"][0][i], "sim": round(sims[i], 3), "meta": r["metadatas"][0][i],
              "text": r["documents"][0][i]} for i in chosen]
 
 
 def label_lookup(col, query, k=3):
+    """Search the approved label only. Talking points come from here."""
     return _search(col, query, {"status": "approved"}, k)
 
 
 def call_note_recall(col, provider_id, query, k=2):
+    """Search one provider's past call notes for a topic; never returns another provider's notes."""
     return _search(col, query, {"$and": [{"source": "call_note"}, {"provider_id": provider_id}]}, k)
 
 
@@ -103,10 +116,12 @@ def recent_call_notes(col, provider_id, k=2):
 
 
 def trial_search(col, query, k=2):
+    """Search clinical trials; each hit is tagged approved or investigational."""
     return _search(col, query, {"source": "trial"}, k)
 
 
 def publication_search(col, provider_id, query, k=2):
+    """Search one provider's own publications for a topic."""
     return _search(col, query, {"$and": [{"source": "publication"}, {"provider_id": provider_id}]}, k)
 
 
@@ -118,6 +133,7 @@ def naive_search(col, query, k=4):
 
 
 def show(title, hits):
+    """Print search hits for the demo, or say nothing passed the similarity threshold."""
     print(f"  {title}")
     for h in hits:
         tag = h["meta"].get("status", h["meta"].get("provider_id", ""))
@@ -127,6 +143,9 @@ def show(title, hits):
 
 
 if __name__ == "__main__":
+    from navinib.log import setup_logging
+
+    setup_logging()
     col = build_index(sys.argv[1] if len(sys.argv) > 1 else CHROMA_PATH)
     print(f"Indexed {col.count()} chunks\n")
 

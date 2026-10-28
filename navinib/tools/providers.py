@@ -8,6 +8,9 @@ import sqlite3
 from datetime import date
 
 from navinib import config
+from navinib.log import get_logger
+
+log = get_logger("navinib.tools.providers")
 
 
 def drive_minutes(lat1: float, lon1: float, lat2: float, lon2: float) -> int:
@@ -56,6 +59,8 @@ def provider_lookup(con: sqlite3.Connection, rep_id: str, day: str,
             if max_drive_min is not None and p["drive_min"] > max_drive_min:
                 continue
         out.append(p)
+    log.info("provider_lookup day=%s near=%s max_drive=%s open=%s-%s exclude=%s -> %d of %d locations",
+             day, near, max_drive_min, open_from, open_until, sorted(exclude) or "-", len(out), len(rows))
     return out
 
 
@@ -66,6 +71,7 @@ def provider_scoring(con: sqlite3.Connection, providers: list[dict], today: str)
     (config.CALL_CREDIT). Recency counts face-to-face visits only.
     """
     if not providers:
+        log.info("provider_scoring 0 candidates")
         return []
     t = date.fromisoformat(today)
     month_start = t.replace(day=1).isoformat()
@@ -103,6 +109,11 @@ def provider_scoring(con: sqlite3.Connection, providers: list[dict], today: str)
         ranked.append({**p, "score": round(sum(breakdown.values()), 3),
                        "breakdown": breakdown, "reasons": reasons})
     ranked.sort(key=lambda x: x["score"], reverse=True)
+    log.info("provider_scoring %d candidates -> top: %s", len(ranked),
+             ", ".join(f"{p['full_name']} {p['score']}" for p in ranked[:3]))
+    for p in ranked:
+        log.debug("  %s %s %s score=%s %s", p["provider_id"], p.get("location_id", ""), p["full_name"],
+                  p["score"], p["breakdown"])
     return ranked
 
 
