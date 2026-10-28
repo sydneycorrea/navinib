@@ -89,10 +89,15 @@ def plan_route(start: dict, start_min: int, end_min: int, candidates: list[dict]
 
 
 def _brief(c: dict) -> dict:
+    """The identifying fields of a candidate, used in planned and dropped lists."""
     return {"provider_id": c["provider_id"], "location_id": c["location_id"], "full_name": c["full_name"]}
 
 
 def _solve(pts, candidates, usable, start_min, end_min, drive, visit_min, max_visits):
+    """Run OR-Tools routing with time windows over the usable candidates.
+
+    Returns the ordered visits with start times, and the candidates the solver left out.
+    """
     nodes = [0] + usable                      # node 0 = start; last node = open end (free to reach)
     n = len(nodes) + 1
     end_node = n - 1
@@ -100,11 +105,13 @@ def _solve(pts, candidates, usable, start_min, end_min, drive, visit_min, max_vi
     routing = pywrapcp.RoutingModel(mgr)
 
     def travel(a, b):
+        """Drive minutes between two solver nodes; reaching the open end node is free."""
         if b == end_node or a == end_node:
             return 0
         return drive.between(pts[nodes[a]], pts[nodes[b]])
 
     def transit(i, j):
+        """Time used leaving node i for node j: the visit at i (if any) plus the drive."""
         a, b = mgr.IndexToNode(i), mgr.IndexToNode(j)
         return travel(a, b) + (visit_min if 0 < a < end_node else 0)
 

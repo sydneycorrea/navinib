@@ -7,10 +7,12 @@ log = get_logger("navinib.tools.schedule")
 
 
 def hhmm(minutes: int) -> str:
+    """Turn minutes after midnight into 'HH:MM' (e.g. 870 -> '14:30')."""
     return f"{minutes // 60:02d}:{minutes % 60:02d}"
 
 
 def schedule_lookup(con: sqlite3.Connection, rep_id: str, day: str) -> dict:
+    """The rep's events for one day, in time order, plus where the rep starts (Action 1)."""
     rep = con.execute("SELECT * FROM rep WHERE rep_id = ?", (rep_id,)).fetchone()
     if rep is None:
         raise ValueError(f"unknown rep {rep_id!r}")

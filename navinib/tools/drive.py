@@ -23,12 +23,14 @@ OSRM_URL = "https://router.project-osrm.org/table/v1/driving/{coords}?annotation
 
 
 def _points(con: sqlite3.Connection) -> dict[str, tuple[float, float]]:
+    """Every place the rep can drive between: the rep's home and each provider location, by id."""
     pts = {f"home:{r['rep_id']}": (r["home_lat"], r["home_lon"]) for r in con.execute("SELECT * FROM rep")}
     pts.update({r["location_id"]: (r["lat"], r["lon"]) for r in con.execute("SELECT * FROM location")})
     return pts
 
 
 def _osrm_minutes(points: dict[str, tuple[float, float]]) -> dict[str, dict[str, int]]:
+    """Ask the free OSRM table API for road minutes between every pair of points."""
     ids = list(points)
     coords = ";".join(f"{lon},{lat}" for lat, lon in points.values())   # OSRM wants lon,lat
     with urllib.request.urlopen(OSRM_URL.format(coords=coords), timeout=30) as resp:
@@ -38,6 +40,10 @@ def _osrm_minutes(points: dict[str, tuple[float, float]]) -> dict[str, dict[str,
 
 
 def build_cache(con: sqlite3.Connection, path: Path | str = CACHE_PATH, use_osrm: bool = True) -> dict:
+    """Compute drive minutes between all points and save them to the cache file.
+
+    Uses OSRM when it can be reached, otherwise the straight-line estimate (and logs a warning).
+    """
     points = _points(con)
     source = "estimate"
     minutes = None
@@ -60,6 +66,7 @@ class DriveTimes:
     """Looks up cached road minutes by point id, falling back to the estimate."""
 
     def __init__(self, path: Path | str = CACHE_PATH):
+        """Load the cache file; with no file, every lookup uses the estimate."""
         p = Path(path)
         cache = json.loads(p.read_text()) if p.exists() else {"source": "estimate", "minutes": {}}
         self.source = cache["source"]

@@ -42,6 +42,7 @@ WEEKDAYS = range(5)  # Mon-Fri
 
 
 def every_weekday(open_min: int, close_min: int) -> dict[int, tuple[int, int]]:
+    """Same opening hours Monday to Friday, as {weekday: (open_min, close_min)}."""
     return {d: (open_min, close_min) for d in WEEKDAYS}
 
 
@@ -107,6 +108,11 @@ def _demo_schedule(rep_id: str) -> list[tuple]:
 
 
 def generate(path: Path | str = config.DB_PATH, seed: int = config.SEED) -> Path:
+    """Build the synthetic world in a fresh SQLite file: rep, manager, providers, locations, contacts,
+    call history, lab alerts, publications and the demo day's schedule.
+
+    The same seed always gives the same data. Deletes any existing file at `path` first.
+    """
     rng = random.Random(seed)
     path = Path(path)
     if path.exists():
@@ -121,6 +127,7 @@ def generate(path: Path | str = config.DB_PATH, seed: int = config.SEED) -> Path
     providers, locations, hours, prescribing, alerts = [], [], [], [], []
 
     def add_location(pid, affiliation, lat, lon, week):
+        """Add one practice location for provider `pid` with its weekly hours and a made-up street address."""
         lid = f"L-{len(locations) + 1:03d}"
         addr = f"{rng.randint(100, 2999)} {rng.choice(STREETS)}, Pittsburgh, PA"
         locations.append((lid, pid, affiliation, addr, lat, lon))

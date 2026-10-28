@@ -14,6 +14,11 @@ log = get_logger("navinib.tools.brief")
 
 def build_brief(con: sqlite3.Connection, col, provider_id: str, day: str, rep_id: str = "rep-01",
                 topic: str | None = None) -> dict:
+    """Collect everything the rep should see before visiting one provider (Action 4).
+
+    Combines facts from SQLite with text retrieved from Chroma, each tagged with its source id,
+    and lists what must not be raised (investigational trials and publications).
+    """
     provider = con.execute("SELECT * FROM provider WHERE provider_id = ?", (provider_id,)).fetchone()
     if provider is None:
         raise ValueError(f"unknown provider {provider_id!r}")

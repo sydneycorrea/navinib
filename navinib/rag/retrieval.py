@@ -37,6 +37,10 @@ def chunk(text, size=CHUNK_WORDS, overlap=OVERLAP_WORDS):
 
 
 def build_index(path=CHROMA_PATH):
+    """Embed the label, trials, call notes and publications into a fresh Chroma collection.
+
+    Each chunk carries metadata (source, status, provider_id) that the searches below filter on.
+    """
     client = chromadb.PersistentClient(path=str(path))
     ef = embedding_functions.DefaultEmbeddingFunction()  # all-MiniLM-L6-v2
     try:
@@ -80,6 +84,7 @@ def _search(col, query, where, k, fetch_k=8, lam=0.7):
     chosen = []
     while cands and len(chosen) < k:   # MMR (Lab 3.2)
         def score(i):
+            """MMR score: relevance to the query minus overlap with what's already chosen."""
             red = max((float(embs[i] @ embs[j]) for j in chosen), default=0.0)
             return lam * sims[i] - (1 - lam) * red
         best = max(cands, key=score)
@@ -92,10 +97,12 @@ def _search(col, query, where, k, fetch_k=8, lam=0.7):
 
 
 def label_lookup(col, query, k=3):
+    """Search the approved label only. Talking points come from here."""
     return _search(col, query, {"status": "approved"}, k)
 
 
 def call_note_recall(col, provider_id, query, k=2):
+    """Search one provider's past call notes for a topic; never returns another provider's notes."""
     return _search(col, query, {"$and": [{"source": "call_note"}, {"provider_id": provider_id}]}, k)
 
 
@@ -109,10 +116,12 @@ def recent_call_notes(col, provider_id, k=2):
 
 
 def trial_search(col, query, k=2):
+    """Search clinical trials; each hit is tagged approved or investigational."""
     return _search(col, query, {"source": "trial"}, k)
 
 
 def publication_search(col, provider_id, query, k=2):
+    """Search one provider's own publications for a topic."""
     return _search(col, query, {"$and": [{"source": "publication"}, {"provider_id": provider_id}]}, k)
 
 
@@ -124,6 +133,7 @@ def naive_search(col, query, k=4):
 
 
 def show(title, hits):
+    """Print search hits for the demo, or say nothing passed the similarity threshold."""
     print(f"  {title}")
     for h in hits:
         tag = h["meta"].get("status", h["meta"].get("provider_id", ""))

@@ -21,6 +21,7 @@ FORMAT = "%(asctime)s %(levelname)-7s %(name)-24s %(message)s"
 
 
 def get_logger(name: str) -> logging.Logger:
+    """Return a logger under 'navinib', so everything it writes goes to the Navinib log."""
     return logging.getLogger(name if name.startswith("navinib") else f"navinib.{name}")
 
 
