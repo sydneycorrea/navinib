@@ -40,6 +40,10 @@ QUERIES = {
 
 
 def export(out_dir: Path | str = config.ROOT / "data" / "csv", db_path: Path | str = config.DB_PATH) -> Path:
+    """Write each table to a CSV in out_dir so the synthetic data can be reviewed in a spreadsheet.
+
+    Returns the output folder.
+    """
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     con = connect(db_path)

@@ -102,6 +102,7 @@ CREATE TABLE IF NOT EXISTS plan_decision (       -- long-term memory of accept/e
 
 
 def connect(path: Path | str = DB_PATH) -> sqlite3.Connection:
+    """Open the SQLite database (creating its folder if needed); rows can be read by column name."""
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     con = sqlite3.connect(path)
     con.row_factory = sqlite3.Row
@@ -110,4 +111,5 @@ def connect(path: Path | str = DB_PATH) -> sqlite3.Connection:
 
 
 def create_schema(con: sqlite3.Connection) -> None:
+    """Create all Navinib tables in an empty database."""
     con.executescript(SCHEMA)

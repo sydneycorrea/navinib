@@ -223,3 +223,6 @@ __marimo__/
 data/*.db
 data/csv/
 chroma_db/
+
+# Run logs
+logs/

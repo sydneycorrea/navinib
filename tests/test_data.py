@@ -5,16 +5,19 @@ from navinib.rag.corpus import CALL_NOTES
 
 
 def test_world_size_and_rep(con):
+    """The world has the configured number of providers and one rep."""
     assert con.execute("SELECT COUNT(*) FROM provider").fetchone()[0] == config.N_PROVIDERS
     assert con.execute("SELECT COUNT(*) FROM rep").fetchone()[0] == 1
 
 
 def test_call_note_providers_exist(con):
+    """Every call note belongs to a provider that exists in the database."""
     ids = {r[0] for r in con.execute("SELECT provider_id FROM provider")}
     assert {pid for _, pid, *_ in CALL_NOTES} <= ids
 
 
 def test_generation_is_reproducible(tmp_path):
+    """Generating twice with the same seed gives identical providers."""
     rows = []
     for name in ("a.db", "b.db"):
         c = connect(generate(tmp_path / name))
@@ -24,16 +27,19 @@ def test_generation_is_reproducible(tmp_path):
 
 
 def test_provider_ids_are_a_sequence(con):
+    """Provider ids run p-001, p-002, ... with no gaps."""
     ids = [r[0] for r in con.execute("SELECT provider_id FROM provider ORDER BY provider_id")]
     assert ids == [f"p-{n:03d}" for n in range(1, config.N_PROVIDERS + 1)]
 
 
 def test_no_drug_brand_names(con):
+    """Provider and practice names never mention a drug."""
     names = " ".join(r[0] for r in con.execute("SELECT full_name || affiliation FROM provider JOIN location USING (provider_id)"))
     assert "Product X" not in names  # the only drug name in the project is the placeholder
 
 
 def test_csv_export(tmp_path):
+    """The CSV export writes exactly the expected review files."""
     from navinib.data.export_csv import export
     out = export(tmp_path / "csv", generate(tmp_path / "x.db"))
     assert {p.name for p in out.iterdir()} == {"providers.csv", "contacts.csv", "call_history.csv",
