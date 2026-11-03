@@ -5,7 +5,7 @@ from navinib.planner.tot import tree_of_thought
 from navinib.tools import cancel_event
 from navinib.tools.drive import DriveTimes, build_cache
 
-LEE, MARCHETTI, HILLCREST, SMITH = "p-001", "p-012", "p-005", "p-003"
+LEE, LEIGH, MARCHETTI, HILLCREST, SMITH = "p-001", "p-002", "p-012", "p-005", "p-003"
 
 
 @pytest.fixture()
@@ -112,3 +112,24 @@ def test_early_notice_opens_a_longer_window_and_reaches_hillcrest(con, estimate)
     assert r["window"] == {"start": "13:00", "end": "15:30"}
     hillcrest = [s for s in r["chosen"]["steps"] if s["provider_id"] == HILLCREST]
     assert hillcrest and hillcrest[0]["call_type"] == "face_to_face" and hillcrest[0]["end"] <= "14:30"
+
+
+def test_cancel_seen_at_lunch_starts_after_the_next_call(con, estimate):
+    """Sydney's case: 11:30 call, lunch, 1:00 call, 2:00 call cancels (seen at 12:20), 4:30 call.
+
+    The replan starts at the 1:00 call's office when it ends, and fills 1:30-3:30.
+    """
+    d = config.DEMO_DATE
+    con.execute("DELETE FROM schedule_event")
+    con.executemany(
+        "INSERT INTO schedule_event (event_id, rep_id, date, start_min, end_min, kind, provider_id, location_id,"
+        " title) VALUES (?, 'rep-01', ?, ?, ?, 'call', ?, ?, ?)",
+        [("a", d, 11 * 60 + 30, 12 * 60, "p-004", "L-005", "11:30 call"),
+         ("b", d, 13 * 60, 13 * 60 + 30, "p-006", "L-007", "1:00 call"),
+         ("c", d, 14 * 60, 14 * 60 + 30, SMITH, "L-004", "2:00 call"),
+         ("d", d, 16 * 60 + 30, 17 * 60, LEIGH, "L-003", "4:30 call")])
+    cancel_event(con, "c")
+    r = tree_of_thought(con, "rep-01", d, "c", 12 * 60 + 20, estimate)
+    assert r["window"] == {"start": "13:30", "end": "15:30"}
+    assert r["start_location_id"] == "L-007" and "last booked call" in r["start_reason"]
+    assert r["chosen"]["steps"] and r["chosen"]["steps"][0]["start"] >= "13:30"
