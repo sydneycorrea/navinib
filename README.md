@@ -65,6 +65,7 @@ python -m navinib.tools.brief p-001  # pre-call brief for Dr. Lee
 python -m navinib.tools.drive    # optional, needs internet: cache real road times from OSRM
 python -m navinib.tools.route    # the 2.1 replan: 2pm cancels, who fits?
 python -m navinib.planner.tot    # the 4.1 Tree-of-Thought replan: compare plans, pick one, say why
+python -m navinib.planner.tot 12:00  # same, but the rep hears of the cancellation at noon
 pytest                           # runs the tests
 ```
 

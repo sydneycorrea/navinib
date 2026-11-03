@@ -90,3 +90,25 @@ def test_no_window_is_reported_not_guessed(con, estimate):
     r = _replan(con, estimate, now_min=15 * 60 + 10)
     assert r["window"] is None and r["chosen"]["steps"] == []
     assert "no open window" in r["reason"]
+
+
+def test_start_point_follows_when_the_rep_hears(con, estimate):
+    """On arrival the rep starts at the cancelled office; told at noon, from the last booked call (Okafor, L-005)."""
+    assert _replan(con, estimate)["start_location_id"] == "L-004"
+    noon = _replan(con, estimate, now_min=12 * 60)
+    assert noon["start_location_id"] == "L-005" and "last booked call" in noon["start_reason"]
+
+
+def test_live_location_overrides_the_guess(con, estimate):
+    """When the rep says where they are, the replan starts there."""
+    cancel_event(con, "ev-04")
+    r = tree_of_thought(con, "rep-01", config.DEMO_DATE, "ev-04", 12 * 60, estimate, at_location_id="L-001")
+    assert r["start_location_id"] == "L-001" and r["start_reason"] == "where the rep says they are"
+
+
+def test_early_notice_opens_a_longer_window_and_reaches_hillcrest(con, estimate):
+    """Told at noon, the window runs from the end of lunch (13:00), so Hillcrest can be visited before 2:30."""
+    r = _replan(con, estimate, now_min=12 * 60)
+    assert r["window"] == {"start": "13:00", "end": "15:30"}
+    hillcrest = [s for s in r["chosen"]["steps"] if s["provider_id"] == HILLCREST]
+    assert hillcrest and hillcrest[0]["call_type"] == "face_to_face" and hillcrest[0]["end"] <= "14:30"

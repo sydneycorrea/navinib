@@ -165,29 +165,57 @@ def next_steps(plan: Plan, pool: dict, end_min: int, drive: DriveTimes) -> tuple
     return children, pruned
 
 
+def start_point(con: sqlite3.Connection, rep_id: str, event: dict, window: dict, now_min: int,
+                at_location_id: str | None = None) -> tuple[dict, str]:
+    """Where the rep will be when the freed window opens, and why that place was chosen.
+
+    In order: the location the rep reports (live location, later from the app); the
+    cancelled call's office if the cancellation came on arrival (now is at or past its
+    start); the last booked call before the window; otherwise the rep's home.
+    """
+    if at_location_id:
+        loc_id, why = at_location_id, "where the rep says they are"
+    elif now_min >= event["start_min"] and event["location_id"]:
+        loc_id, why = event["location_id"], "cancelled on arrival, so the rep is at that office"
+    elif window["last_location_id"]:
+        loc_id, why = window["last_location_id"], "the last booked call before the window"
+    else:
+        rep = con.execute("SELECT * FROM rep WHERE rep_id = ?", (rep_id,)).fetchone()
+        return {"id": f"home:{rep_id}", "lat": rep["home_lat"], "lon": rep["home_lon"]}, "no earlier call, so home"
+    loc = con.execute("SELECT * FROM location WHERE location_id = ?", (loc_id,)).fetchone()
+    if loc is None:
+        raise ValueError(f"unknown location {loc_id!r}")
+    return {"id": loc["location_id"], "lat": loc["lat"], "lon": loc["lon"]}, why
+
+
 def tree_of_thought(con: sqlite3.Connection, rep_id: str, day: str, cancelled_event_id: str,
-                    now_min: int, drive: DriveTimes | None = None) -> dict:
+                    now_min: int, drive: DriveTimes | None = None, at_location_id: str | None = None) -> dict:
     """Replan the window freed by a cancelled call by comparing alternative plans.
 
+    now_min is when the rep learns of the cancellation; it can be hours ahead of the
+    call. at_location_id overrides where the rep starts (see start_point).
     Returns the chosen plan, the runners-up, the reason for the choice, and a
     per-level trace of what was kept and pruned (for review and the report).
     """
     drive = drive or DriveTimes()
     sched = schedule_lookup(con, rep_id, day)
     event = next(e for e in sched["events"] if e["event_id"] == cancelled_event_id)
-    window = next((w for w in free_windows(sched, now_min=now_min) if w["start_min"] <= now_min < w["end_min"]),
+    # The window that now holds the cancelled call's time; if the news comes early,
+    # it may start later (after lunch) or earlier (merged with a gap before the call).
+    slot = max(now_min, event["start_min"])
+    window = next((w for w in free_windows(sched, now_min=now_min) if w["start_min"] <= slot < w["end_min"]),
                   None)
     if window is None:
         log.warning("tot: no open window at %s after %s cancelled", hhmm(now_min), cancelled_event_id)
-        return {"window": None, "start_location_id": event["location_id"], "chosen": _out(Plan()),
+        return {"window": None, "start_location_id": None, "start_reason": None, "chosen": _out(Plan()),
                 "alternatives": [], "reason": f"no open window of {config.VISIT_MIN}+ minutes at {hhmm(now_min)}",
                 "trace": [], "drive_source": drive.source}
-    loc = con.execute("SELECT * FROM location WHERE location_id = ?", (event["location_id"],)).fetchone()
-    start = {"id": loc["location_id"], "lat": loc["lat"], "lon": loc["lon"]}   # the rep is at the cancelled call
+    start, start_reason = start_point(con, rep_id, event, window, now_min, at_location_id)
     booked = {e["provider_id"] for e in sched["events"] if e["provider_id"]}
     pool = candidates(con, rep_id, day, start, booked, window, drive)
-    log.info("tot: %s cancelled, window %s-%s from %s; %d visit and %d phone candidates", cancelled_event_id,
-             window["start"], window["end"], start["id"], len(pool["face_to_face"]), len(pool["phone"]))
+    log.info("tot: %s cancelled at %s, window %s-%s from %s (%s); %d visit and %d phone candidates",
+             cancelled_event_id, hhmm(now_min), window["start"], window["end"], start["id"], start_reason,
+             len(pool["face_to_face"]), len(pool["phone"]))
 
     # Remaining time is valued at the best rate a single visit achieves from here, drive included.
     end_min = window["end_min"]
@@ -231,7 +259,7 @@ def tree_of_thought(con: sqlite3.Connection, rep_id: str, day: str, cancelled_ev
     reason = _reason(best, alternatives)
     log.info("tot chose %.3f %s (%s)", best.value(), best.label(), reason)
     return {"window": {"start": window["start"], "end": window["end"]}, "start_location_id": start["id"],
-            "chosen": _out(best), "alternatives": [_out(p) for p in alternatives], "reason": reason,
+            "start_reason": start_reason, "chosen": _out(best), "alternatives": [_out(p) for p in alternatives], "reason": reason,
             "trace": trace, "drive_source": drive.source}
 
 
@@ -273,9 +301,14 @@ if __name__ == "__main__":
     setup_logging()
     con = connect()
     cancel_event(con, "ev-04")
-    r = tree_of_thought(con, "rep-01", config.DEMO_DATE, "ev-04", now_min=14 * 60)
-    print(f"Open window {r['window']['start']} to {r['window']['end']} from {r['start_location_id']} "
-          f"(drive times: {r['drive_source']})\n")
+    import sys
+    # Optional: the time the rep hears of the cancellation, e.g. 12:00 (default 14:00, on arrival).
+    h, m = (sys.argv[1] if len(sys.argv) > 1 else "14:00").split(":")
+    r = tree_of_thought(con, "rep-01", config.DEMO_DATE, "ev-04", now_min=int(h) * 60 + int(m))
+    if r["window"] is None:
+        sys.exit(f"No replan: {r['reason']}")
+    print(f"Open window {r['window']['start']} to {r['window']['end']} from {r['start_location_id']}, "
+          f"{r['start_reason']} (drive times: {r['drive_source']})\n")
     for t in r["trace"]:
         print(f"Level {t['level']}: {t['generated']} plans generated, {len(t['kept'])} kept")
         if t["kept"]:
