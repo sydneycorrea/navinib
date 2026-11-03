@@ -17,7 +17,7 @@ Phase 1 of the MVP plan (Oct 27 to Nov 2): synthetic data, SQLite, the first too
 | Retrieval for pre-call briefs (Chroma + all-MiniLM-L6-v2) | Done (ported from 3.1) |
 | Pre-call brief inputs: notes, publications, label points, do-not-raise list, contacts | Done (LLM write-up in phase 2) |
 | Route optimizer (OR-Tools, time windows) + drive-time cache | Done |
-| Tree-of-Thought replan | Phase 1 |
+| Tree-of-Thought replan (Checkpoint 4.1) | Done |
 | ReAct planner (LangGraph + free OpenRouter model) | Phase 2 |
 | Multi-agent split | Phase 2 (Module 5) |
 | Plan validator and guardrails | Phase 3 (Module 6) |
@@ -41,6 +41,8 @@ navinib/
     brief.py           pre-call brief inputs, each with its source id
     route.py           free windows in the day, OR-Tools route with office-hour windows
     drive.py           drive-time cache (OSRM road times, straight-line fallback)
+  planner/             planning strategies on top of the tools
+    tot.py             Tree-of-Thought replan: compares alternative plans for a freed window
   rag/                 retrieval for pre-call briefs
     corpus.py          fictional Product X label, trials, call notes, provider publications
     retrieval.py       label lookup, trial search, call-note recall, publication search
@@ -62,6 +64,8 @@ python -m navinib.rag.retrieval  # Checkpoint 3.1 retrieval demo
 python -m navinib.tools.brief p-001  # pre-call brief for Dr. Lee
 python -m navinib.tools.drive    # optional, needs internet: cache real road times from OSRM
 python -m navinib.tools.route    # the 2.1 replan: 2pm cancels, who fits?
+python -m navinib.planner.tot    # the 4.1 Tree-of-Thought replan: compare plans, pick one, say why
+python -m navinib.planner.tot 12:00  # same, but the rep hears of the cancellation at noon
 pytest                           # runs the tests
 ```
 
@@ -80,6 +84,8 @@ A run of the replan demo logs the cancellation, the open window, the provider lo
 ## Demo day
 
 The scripted demo day (`2026-10-27`) follows the Checkpoint 2.1 example: the rep's 2:00 call with Dr. Helen Smith cancels. Provider scoring ranks Hillcrest Cancer Center first, but the route optimizer finds it closes at 2:30 before a 30-minute visit can finish, so the next candidate, Dr. Alicia Lee, fills the slot and gets a brief from the retrieval layer.
+
+The Tree-of-Thought replan (`python -m navinib.planner.tot`, Checkpoint 4.1) looks past the first fill. It grows a small tree of alternative plans for the 2:00 to 3:30 gap (in-person visits nearby, plus at most one phone call to a provider no visit can reach, such as Hillcrest before it closes), rules out branches that break office hours or the window, ranks the rest with a fixed value function, and keeps the best few of each shape at every level. It chooses two visits, Dr. Lee 2:10 to 2:40 and Dr. Irene Marchetti 2:57 to 3:27 (value 1.39), over phoning Hillcrest and then visiting Dr. Lee (1.20) or Dr. Lee alone (0.73), and prints why.
 
 Drive times use a straight-line estimate until you run `python -m navinib.tools.drive` once with internet access; that saves real road times from the free OSRM service to `data/drive_times.json`, which you can commit so the demo works offline.
 
