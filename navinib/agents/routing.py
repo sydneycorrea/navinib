@@ -26,7 +26,7 @@ def routing(state: dict, config: dict) -> dict:
     req = state["request"]
     exclude = set(state.get("feedback", {}).get("exclude", []))
     if req["flow"] == "cancellation":
-        plan = _replan(con, req, drive, exclude)
+        plan = _replan(con, req, state["targets"]["pool"], drive, exclude)
     else:
         plan = _morning(con, req, state["schedule"], state["targets"]["ranked"], drive, exclude)
     plan["round"] = state.get("round", 0)
@@ -66,10 +66,10 @@ def _morning(con: sqlite3.Connection, req: dict, schedule: dict, targets: list, 
             "underfilled": underfilled, "alternatives": [], "reason": None, "drive_source": drive.source}
 
 
-def _replan(con: sqlite3.Connection, req: dict, drive: DriveTimes, exclude: set[str]) -> dict:
-    """Tree-of-Thought replan of the window the cancelled call freed."""
+def _replan(con: sqlite3.Connection, req: dict, pool: dict, drive: DriveTimes, exclude: set[str]) -> dict:
+    """Tree-of-Thought replan of the window the cancelled call freed, over Targeting's nearby shortlist."""
     r = tree_of_thought(con, req["rep_id"], req["day"], req["event_id"], req["now_min"], drive,
-                        at_location_id=req.get("at_location_id"), exclude=exclude)
+                        at_location_id=req.get("at_location_id"), exclude=exclude, pool=pool)
     return {"flow": "cancellation", "window": r["window"], "start_location_id": r["start_location_id"],
             "start_reason": r["start_reason"], "visits": r["chosen"]["steps"], "alternatives": r["alternatives"],
             "reason": r["reason"], "drive_source": r["drive_source"]}

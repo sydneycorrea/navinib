@@ -106,8 +106,8 @@ Drive times use a straight-line estimate until you run `python -m navinib.tools.
 
 The multi-agent design from Checkpoint 5.1 runs in `navinib/agents/`. The Coordinator is the hub: every agent reports back to it and it decides what runs next, so no agent calls another.
 
-- **Morning plan:** Coordinator, Targeting, Routing (OR-Tools), Compliance (providers and times), then the rep approves. No briefs yet.
-- **Cancellation:** the Coordinator cancels the call and skips Targeting; Routing runs the Tree-of-Thought replan; Compliance checks it; the rep approves.
+- **Morning plan:** Coordinator, Targeting (territory mode), Routing (OR-Tools), Compliance (providers and times), then the rep approves. No briefs yet.
+- **Cancellation:** the Coordinator cancels the call; Targeting (nearby mode) ranks only providers within a 20-minute drive of where the rep will be when the freed window opens, plus phone candidates for top providers no visit can reach; Routing runs the Tree-of-Thought replan over that shortlist; Compliance checks it; the rep approves.
 - **Briefs, just in time:** `brief_next_call(con, rep_id, day, now_min)` runs on a timer or when the rep opens the app. When the next booked call's brief is due, Brief writes that call's brief only and Compliance checks its claims. The timing is set per call: due = call start - drive there (from the last booked call, or home) - reading time (`BRIEF_READ_MIN`, 15 min), written `BRIEF_GEN_MARGIN_MIN` (5 min) before that, or right away if that time has passed. A call 20 minutes away after a replan is briefed as soon as the rep approves; a call 45 minutes away is briefed earlier than one next door. `PREP_BUFFER_MIN` stays a planning rule, not the brief timer. A brief is saved once per call, and a cancelled call never gets one, so no tokens go to calls that cancel or move.
 - **Two-way links (the only ones):**
   - Routing to Targeting, at most once: if the morning route drops providers that don't fit (office hours or drive time) and leaves room in the day, Targeting re-ranks without them and Routing runs again.

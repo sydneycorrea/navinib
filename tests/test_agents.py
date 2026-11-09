@@ -79,11 +79,20 @@ def test_morning_plan_has_no_briefs_until_approved(con, col, drive):
     assert not final.get("briefs") and _briefed(con) == set()
 
 
-def test_cancellation_skips_targeting_and_uses_tot(con, col, drive):
-    """Cancellation: the call is cancelled, Targeting is skipped, ToT replans, and no brief is written yet."""
+def test_cancellation_goes_through_targeting_nearby_then_tot(con, col):
+    """Cancellation: the call is cancelled, Targeting ranks only providers near the rep (phone for the rest),
+    and ToT over that shortlist keeps the 4.1 result: Dr. Lee, then Dr. Marchetti. No brief is written yet."""
+    drive = DriveTimes()
+    if drive.source != "osrm":
+        pytest.skip("needs the committed OSRM drive-time cache")
     final = run(con, CANCEL, col=col, drive=drive)
-    assert "targeting" not in _agents_in(final["trace"]) and "targets" not in final
+    assert _agents_in(final["trace"]) == ["coordinator", "targeting", "coordinator", "routing", "coordinator",
+                                          "compliance", "coordinator"]
+    t = final["targets"]
+    assert t["mode"] == "nearby" and "p-003" not in {c["provider_id"] for c in t["ranked"]}   # not Dr. Smith
+    assert {c["provider_id"] for c in t["pool"]["face_to_face"]} >= {LEE, "p-012"}
     assert final["plan"]["flow"] == "cancellation" and final["plan"]["reason"]
+    assert [v["provider_id"] for v in final["plan"]["visits"]] == [LEE, "p-012"]
     assert con.execute("SELECT status FROM schedule_event WHERE event_id = 'ev-04'").fetchone()[0] == "cancelled"
     assert not final.get("briefs")
 

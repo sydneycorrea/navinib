@@ -3,8 +3,8 @@
 Briefs are written just in time, one call ahead, so no tokens go to a call that
 later cancels or moves (Checkpoint 5.1). That gives three flows:
 
-Morning plan:   Targeting -> Routing -> Compliance (providers and times) -> rep approves
-Cancellation:   cancel the call -> Routing (ToT, Targeting skipped) -> Compliance -> rep approves
+Morning plan:   Targeting (territory) -> Routing (OR-Tools) -> Compliance (providers and times) -> rep approves
+Cancellation:   cancel the call -> Targeting (nearby) -> Routing (ToT) -> Compliance -> rep approves
 Brief next:     when the next booked call's brief is due -> Brief (that call only) -> Compliance (claims)
 
 A brief's timing is set per call: it is due at the call's start minus the drive there
@@ -129,11 +129,13 @@ def approve_plan(con: sqlite3.Connection, state: dict) -> list[str]:
 
 
 def _plan_flow(state: dict, cfg: dict) -> dict:
-    """Morning plan or cancellation replan: rank (morning only), route, check, then ask for approval."""
+    """Morning plan or cancellation replan: rank, route, check, then ask for approval."""
     req = state["request"]
     refill = state.get("refill", {}).get("round", 0)
-    if req["flow"] == "morning" and ("targets" not in state or state["targets"]["refill"] < refill):
-        return _go("targeting", "rank providers" if not refill else "next candidates for the underfilled day")
+    if "targets" not in state or state["targets"]["refill"] < refill:
+        why = ("next candidates for the underfilled day" if refill else
+               "rank providers in the territory" if req["flow"] == "morning" else "rank providers near the freed window")
+        return _go("targeting", why)
     rnd = state.get("round", 0)
     plan = state.get("plan")
     if plan is None or plan["round"] < state.get("route_round", -1) or plan["refill"] < refill:
@@ -190,7 +192,7 @@ def _start(con: sqlite3.Connection, req: dict, drive: DriveTimes) -> dict:
         line = (f"coordinator: brief check at {hhmm(req['now_min'])}; {due['start']} {due['full_name']} is "
                 f"{due['drive_min']} min from {due['from']}, brief due {hhmm(due['due_min'])} -> brief")
     else:
-        nxt = "targeting" if req["flow"] == "morning" else "routing"
+        nxt = "targeting"
         line = (f"coordinator: {req['flow']} request" + (f", {req['event_id']} cancelled" if req.get("event_id")
                                                         else "") + f"; {len(schedule['events'])} events today -> {nxt}")
     log.info(line)

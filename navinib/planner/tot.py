@@ -24,6 +24,9 @@ The evaluator is plain code, not an LLM, so every choice can be explained and
 tested. In phase 2 the LLM planner calls this as a tool and writes the
 explanation for the rep.
 
+In the agent graph, Targeting (nearby mode) builds the candidate pool with
+candidates() and Routing passes it in; run alone, the replan builds it itself.
+
 Run the 2.1 scenario:  python -m navinib.planner.tot
 """
 import sqlite3
@@ -188,33 +191,52 @@ def start_point(con: sqlite3.Connection, rep_id: str, event: dict, window: dict,
     return {"id": loc["location_id"], "lat": loc["lat"], "lon": loc["lon"]}, why
 
 
+def replan_setup(con: sqlite3.Connection, rep_id: str, day: str, cancelled_event_id: str, now_min: int,
+                 at_location_id: str | None = None) -> dict:
+    """The open window the cancelled call freed, where the rep starts it, and who is already booked.
+
+    The window is the free window that now holds the cancelled call's time; if the
+    news comes early, it may start later (after lunch) or earlier (merged with a gap
+    before the call). window is None when no window of VISIT_MIN+ minutes is open.
+    Targeting (nearby mode) and the replan both start from this, so they agree.
+    """
+    sched = schedule_lookup(con, rep_id, day)
+    event = next(e for e in sched["events"] if e["event_id"] == cancelled_event_id)
+    slot = max(now_min, event["start_min"])
+    window = next((w for w in free_windows(sched, now_min=now_min) if w["start_min"] <= slot < w["end_min"]),
+                  None)
+    booked = {e["provider_id"] for e in sched["events"] if e["provider_id"]}
+    if window is None:
+        return {"event": event, "window": None, "start": None, "start_reason": None, "booked": booked}
+    start, start_reason = start_point(con, rep_id, event, window, now_min, at_location_id)
+    return {"event": event, "window": window, "start": start, "start_reason": start_reason, "booked": booked}
+
+
 def tree_of_thought(con: sqlite3.Connection, rep_id: str, day: str, cancelled_event_id: str,
                     now_min: int, drive: DriveTimes | None = None, at_location_id: str | None = None,
-                    exclude: set[str] | frozenset = frozenset()) -> dict:
+                    exclude: set[str] | frozenset = frozenset(), pool: dict | None = None) -> dict:
     """Replan the window freed by a cancelled call by comparing alternative plans.
 
     now_min is when the rep learns of the cancellation; it can be hours ahead of the
     call. at_location_id overrides where the rep starts (see start_point). exclude
-    lists providers to leave out (e.g. one Compliance rejected).
+    lists providers to leave out (e.g. one Compliance rejected). pool is the
+    shortlist from Targeting's nearby mode ({'face_to_face': [...], 'phone': [...]});
+    without it (the command line and the ToT tests) the replan builds it with candidates().
     Returns the chosen plan, the runners-up, the reason for the choice, and a
     per-level trace of what was kept and pruned (for review and the report).
     """
     drive = drive or DriveTimes()
-    sched = schedule_lookup(con, rep_id, day)
-    event = next(e for e in sched["events"] if e["event_id"] == cancelled_event_id)
-    # The window that now holds the cancelled call's time; if the news comes early,
-    # it may start later (after lunch) or earlier (merged with a gap before the call).
-    slot = max(now_min, event["start_min"])
-    window = next((w for w in free_windows(sched, now_min=now_min) if w["start_min"] <= slot < w["end_min"]),
-                  None)
+    setup = replan_setup(con, rep_id, day, cancelled_event_id, now_min, at_location_id)
+    window, start, start_reason = setup["window"], setup["start"], setup["start_reason"]
     if window is None:
         log.warning("tot: no open window at %s after %s cancelled", hhmm(now_min), cancelled_event_id)
         return {"window": None, "start_location_id": None, "start_reason": None, "chosen": _out(Plan()),
                 "alternatives": [], "reason": f"no open window of {config.VISIT_MIN}+ minutes at {hhmm(now_min)}",
                 "trace": [], "drive_source": drive.source}
-    start, start_reason = start_point(con, rep_id, event, window, now_min, at_location_id)
-    booked = {e["provider_id"] for e in sched["events"] if e["provider_id"]} | set(exclude)
-    pool = candidates(con, rep_id, day, start, booked, window, drive)
+    if pool is None:
+        pool = candidates(con, rep_id, day, start, setup["booked"] | set(exclude), window, drive)
+    else:
+        pool = {k: [c for c in v if c["provider_id"] not in exclude] for k, v in pool.items()}
     log.info("tot: %s cancelled at %s, window %s-%s from %s (%s); %d visit and %d phone candidates",
              cancelled_event_id, hhmm(now_min), window["start"], window["end"], start["id"], start_reason,
              len(pool["face_to_face"]), len(pool["phone"]))
