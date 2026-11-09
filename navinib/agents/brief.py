@@ -1,7 +1,10 @@
 """Brief agent: one pre-call brief per new call, written by the LLM from retrieved, cited sources.
 
-The graph runs one copy per call in parallel. If retrieval fails, the call keeps
-its place in the plan with 'brief unavailable' instead of failing the run.
+The graph runs one copy per call in parallel. If retrieval or the model fails, the
+call keeps its place in the plan with a partial brief built from structured data
+only (why the provider ranked high, goal gap, lab alerts, recent calls, who is at
+the office). It is marked as having no label or trial sources and makes no product
+claims, so nothing in it is unsourced.
 """
 import json
 import threading
@@ -9,6 +12,7 @@ import threading
 from navinib.agents.llm import citations
 from navinib.log import get_logger
 from navinib.tools.brief import build_brief
+from navinib.tools.providers import location_contacts, provider_lookup, provider_scoring
 
 log = get_logger("navinib.agents.brief")
 
@@ -35,18 +39,43 @@ def brief(payload: dict, config: dict) -> dict:
             raise RuntimeError("retrieval index not available")
         with _RETRIEVAL:
             inputs = build_brief(cfg["con"], cfg["col"], pid, payload["day"], payload["rep_id"])
-    except Exception as e:  # retrieval down: keep the call, say the brief is missing
-        log.warning("brief %s unavailable: %s", pid, e)
-        return {"briefs": {pid: {"status": "unavailable", "text": "Brief unavailable.", "error": str(e),
-                                 "round": payload["round"]}},
-                "trace": [f"brief {pid}: unavailable ({e})"]}
+    except Exception as e:  # retrieval down: structured facts only
+        return _partial(cfg["con"], payload, f"retrieval failed: {e}")
 
     allowed = sorted({n["ref"] for n in inputs["call_notes"]} | {t["ref"] for t in inputs["talking_points"]}
                      | {p["pub_id"] for p in inputs["publications"] if p["may_discuss"]})
     user = json.dumps({"visit": v, "inputs": inputs, "feedback": payload.get("feedback")}, default=str)
-    text = cfg["llm"].complete("brief", SYSTEM, user,
-                               data={"visit": v, "inputs": inputs, "feedback": payload.get("feedback")})
+    try:
+        text = cfg["llm"].complete("brief", SYSTEM, user,
+                                   data={"visit": v, "inputs": inputs, "feedback": payload.get("feedback")})
+    except Exception as e:  # model down: same structured fallback
+        return _partial(cfg["con"], payload, f"model unavailable: {e}")
     log.info("brief %s round %d: %d words, cites %s", pid, payload["round"], len(text.split()), citations(text))
     return {"briefs": {pid: {"status": "ok", "text": text, "allowed_refs": allowed,
                              "do_not_raise": [d["ref"] for d in inputs["do_not_raise"]], "round": payload["round"]}},
             "trace": [f"brief {pid}: written (round {payload['round']}, cites {', '.join(citations(text))})"]}
+
+
+def _partial(con, payload: dict, why: str) -> dict:
+    """A brief from structured data only, for when retrieval or the model is down. It cites nothing and claims nothing."""
+    v, day, rep_id = payload["visit"], payload["day"], payload["rep_id"]
+    pid = v["provider_id"]
+    with _RETRIEVAL:   # same shared connection as the other parallel briefs
+        p = con.execute("SELECT full_name, tier FROM provider WHERE provider_id = ?", (pid,)).fetchone()
+        rows = [r for r in provider_lookup(con, rep_id, day) if r["provider_id"] == pid]
+        reasons = provider_scoring(con, rows, day)[0]["reasons"] if rows else []
+        calls = con.execute("SELECT date, call_type, outcome FROM visit WHERE provider_id = ? AND date < ?"
+                            " ORDER BY date DESC LIMIT 3", (pid, day)).fetchall()
+        contacts = location_contacts(con, v["location_id"])
+    how = "Visit" if v["call_type"] == "face_to_face" else "Phone call with"
+    lines = [f"{how} {p['full_name']} (tier {p['tier']}) at {v['start']}.",
+             "Partial brief: label and trial sources unavailable, so no product claims for this call."]
+    if reasons:
+        lines.append("Why this provider: " + "; ".join(reasons) + ".")
+    lines.append("Recent calls: " + ("; ".join(f"{c['date']} {c['call_type'].replace('_', ' ')} ({c['outcome']})"
+                                               for c in calls) or "none") + ".")
+    lines += [f"Also at the office: {c['full_name']} ({c['role'].replace('_', ' ')})." for c in contacts]
+    log.warning("brief %s partial: %s", pid, why)
+    return {"briefs": {pid: {"status": "partial", "text": "\n".join(lines), "why": why, "allowed_refs": [],
+                             "do_not_raise": [], "round": payload["round"]}},
+            "trace": [f"brief {pid}: partial, structured data only ({why})"]}

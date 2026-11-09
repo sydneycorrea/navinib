@@ -4,13 +4,13 @@ import pytest
 from navinib import config
 from navinib.agents.coordinator import MAX_RETRIES, _retry
 from navinib.agents.graph import NODES, _owned, run
-from navinib.agents.llm import StubLLM
+from navinib.agents.llm import StubLLM, citations
 from navinib.agents.specs import AGENTS
 from navinib.tools.drive import DriveTimes, build_cache
 
 retrieval = pytest.importorskip("navinib.rag.retrieval")
 
-HILLCREST = "p-005"
+LEE, HILLCREST = "p-001", "p-005"
 
 MORNING = {"flow": "morning", "rep_id": "rep-01", "day": config.DEMO_DATE}
 CANCEL = {"flow": "cancellation", "rep_id": "rep-01", "day": config.DEMO_DATE, "event_id": "ev-04",
@@ -85,12 +85,49 @@ def test_cancellation_skips_targeting_and_uses_tot(con, col, drive):
     assert set(final["briefs"]) == {v["provider_id"] for v in final["plan"]["visits"]}
 
 
-def test_retrieval_down_keeps_the_plan_with_brief_unavailable(con, drive):
-    """No retrieval index: every call stays in the plan, its brief says unavailable, and the rep is told."""
+def test_retrieval_down_gives_a_partial_brief_from_structured_data(con):
+    """No retrieval index: every call stays in the plan with a partial brief that says why the provider
+    matters but makes no product claims, and the rep is told which briefs are partial.
+
+    Uses the committed road times, so the 2pm replan picks Dr. Lee (as in the ToT tests).
+    """
+    drive = DriveTimes()
+    if drive.source != "osrm":
+        pytest.skip("needs the committed OSRM drive-time cache")
     final = run(con, CANCEL, col=None, drive=drive)
     assert final["plan"]["visits"]
-    assert all(b["status"] == "unavailable" for b in final["briefs"].values())
-    assert "Brief unavailable" in final["message"] and final["status"] == "awaiting_approval"
+    lee = final["briefs"][LEE]
+    assert lee["status"] == "partial" and "retrieval failed" in lee["why"]
+    assert "label and trial sources unavailable" in lee["text"]
+    assert "0.5 of 4 tier-A calls done this month" in lee["text"]        # why she ranked high
+    assert "2026-10-14 phone (completed)" in lee["text"]                 # recent calls
+    assert "Kevin Tran (lab technician)" in lee["text"]
+    assert citations(lee["text"]) == [] and "Product X" not in lee["text"]
+    assert final["compliance"]["passed"]
+    assert "Partial brief for" in final["message"] and final["status"] == "awaiting_approval"
+
+
+class DownLLM(StubLLM):
+    """A model that is down: every call fails."""
+
+    def complete(self, task, system, user, data=None):
+        """Always fail, like a free model that is rate-limited or offline."""
+        raise ConnectionError("model offline")
+
+
+def test_model_down_still_gives_the_rep_the_plan(con, col, drive):
+    """Model down: partial briefs, the claims check is skipped with a warning, and the summary is built in code."""
+    final = run(con, CANCEL, col=col, llm=DownLLM(), drive=drive)
+    assert final["plan"]["visits"] and final["status"] == "awaiting_approval"
+    assert all(b["status"] == "partial" and "model unavailable" in b["why"] for b in final["briefs"].values())
+    assert final["message"].startswith("Written summary unavailable (model down). Proposed:")
+
+
+def test_estimated_drive_times_are_labeled(con, col, tmp_path):
+    """No live road times (no cache file): the plan and the rep's summary say the times are estimates."""
+    final = run(con, CANCEL, col=col, drive=DriveTimes(tmp_path / "missing.json"))
+    assert final["plan"]["drive_estimated"]
+    assert "Drive times are estimates" in final["message"]
 
 
 def test_compliance_fail_goes_back_to_brief_and_is_fixed(con, col, drive):

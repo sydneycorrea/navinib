@@ -70,7 +70,7 @@ def run(con: sqlite3.Connection, request: dict, col=None, llm: LLM | None = None
 
     request: {'flow': 'morning' | 'cancellation', 'rep_id', 'day', and for a cancellation
     'event_id' and 'now_min' (plus optional 'at_location_id')}. col is the retrieval index;
-    without it every brief comes back 'unavailable' and the plan still goes through.
+    without it every brief is a partial one from structured data and the plan still goes through.
     """
     config = {"configurable": {"con": con, "col": col, "llm": llm or get_llm(), "drive": drive or DriveTimes()},
               "recursion_limit": 50}

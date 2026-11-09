@@ -48,7 +48,7 @@ navinib/
     coordinator.py     supervisor: routes work, retries after a compliance fail, summary for the rep
     targeting.py       ranks providers (no LLM)
     route_replan.py    morning plan with OR-Tools, cancellation replan with Tree-of-Thought (no LLM)
-    brief.py           one brief per new call, in parallel; "brief unavailable" if retrieval fails
+    brief.py           one brief per new call, in parallel; a partial brief from structured data if retrieval fails
     compliance.py      plan validator: rules first, then an LLM claims check
     llm.py             the model interface and a deterministic stub
     graph.py           LangGraph hub-and-spoke graph; run it from here
@@ -113,6 +113,10 @@ The multi-agent design from Checkpoint 5.1 runs in `navinib/agents/`. The Coordi
   - Compliance to the agent that caused a problem, at most twice. Anything still wrong is flagged to the rep, never silently fixed.
 
   Every other handoff is one-way, and its output is still checked by Compliance and approved by the rep.
+- **When something fails:**
+  - Retrieval or the model down: Brief writes a partial brief from structured data (why the provider ranked high, goal gap, lab alerts, recent calls, who is at the office). It is marked "label and trial sources unavailable" and makes no product claims.
+  - No live road times: Route uses cached or straight-line times, and the plan says they are estimates.
+  - Model down: the rep still gets the ranked plan, with a summary built in code instead of written by the model. If the claims check can't run, the rep sees a warning.
 - **Shared state:** one typed state (`agents/state.py`); each agent may write only its own part, and the graph refuses anything else.
 - **LLM:** a deterministic stub stands in for the model, so the graph and tests run offline. Only the Coordinator (summary), Brief (writing) and Compliance (claims check) use it.
 

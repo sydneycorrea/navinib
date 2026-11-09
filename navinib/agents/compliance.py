@@ -21,12 +21,14 @@ def compliance(state: dict, config: dict) -> dict:
     """Check the plan's timing and each brief; record the round that was checked."""
     cfg = config["configurable"]
     req, plan = state["request"], state["plan"]
-    issues = _plan_issues(cfg["con"], req["day"], state["schedule"], plan["visits"])
+    issues, warnings = _plan_issues(cfg["con"], req["day"], state["schedule"], plan["visits"]), []
     for v in plan["visits"]:
         b = state.get("briefs", {}).get(v["provider_id"])
-        if b and b["status"] == "ok":
-            issues += _brief_issues(cfg["llm"], v["provider_id"], b)
-    result = {"passed": not issues, "issues": issues, "round": state.get("round", 0)}
+        if b:
+            found, warn = _brief_issues(cfg["llm"], v["provider_id"], b)
+            issues += found
+            warnings += warn
+    result = {"passed": not issues, "issues": issues, "warnings": warnings, "round": state.get("round", 0)}
     line = f"compliance round {result['round']}: " + ("passed" if not issues else
                                                     "; ".join(f"{i['agent']} {i.get('provider_id', '')}: "
                                                               f"{i['problem']}" for i in issues))
@@ -55,20 +57,27 @@ def _plan_issues(con: sqlite3.Connection, day: str, schedule: dict, visits: list
     return issues
 
 
-def _brief_issues(llm, pid: str, b: dict) -> list:
-    """No off-label item may appear, every citation must be a source it was given, then the LLM claims check."""
+def _brief_issues(llm, pid: str, b: dict) -> tuple[list, list]:
+    """No off-label item may appear, every citation must be a source it was given, then the LLM claims check.
+
+    A partial brief has no sources, so any citation in it is an issue, and it skips the
+    claims check. If the model is down, the brief is passed on with a warning for the rep.
+    """
     cited = citations(b["text"])
     issues = [{"agent": "brief", "provider_id": pid, "problem": f"mentions do-not-raise item {ref}"}
               for ref in b["do_not_raise"] if ref in b["text"]]
     issues += [{"agent": "brief", "provider_id": pid, "problem": f"cites {ref}, which is not one of its sources"}
                for ref in cited if ref not in b["allowed_refs"] and ref not in b["do_not_raise"]]
-    if issues:
-        return issues
-    answer = llm.complete("claims", CLAIMS_SYSTEM, json.dumps({"brief": b["text"], "sources": b["allowed_refs"]}),
-                          data={"brief": b})
+    if issues or b["status"] != "ok":
+        return issues, []
+    try:
+        answer = llm.complete("claims", CLAIMS_SYSTEM,
+                              json.dumps({"brief": b["text"], "sources": b["allowed_refs"]}), data={"brief": b})
+    except Exception as e:
+        return [], [f"claims check unavailable for {pid} ({e}); rule checks passed"]
     if not answer.strip().startswith("PASS"):
         issues.append({"agent": "brief", "provider_id": pid, "problem": f"unsupported claim: {answer.strip()[:200]}"})
-    return issues
+    return issues, []
 
 
 def _minutes(hhmm: str) -> int:

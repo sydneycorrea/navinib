@@ -13,6 +13,7 @@ The routing is a fixed policy, so the flows are predictable and testable. The LL
 writes the rep-facing summary; with a real model it will also read the rep's
 free-text request and choose among the allowed next steps.
 """
+from navinib.agents.llm import plain_summary
 from navinib.log import get_logger
 from navinib.tools.schedule import cancel_event, schedule_lookup
 
@@ -22,8 +23,8 @@ MAX_RETRIES = 2
 MAX_REFILLS = 1
 
 SUMMARY_SYSTEM = """You are Navinib, a co-pilot for a pharmaceutical field rep. In at most 80 words, tell
-the rep what is proposed for their day and why, mention any brief that is unavailable and any compliance
-issue that needs their review, and ask them to approve. Use only the data given."""
+the rep what is proposed for their day and why, mention any partial brief, estimated drive times, warning
+and compliance issue that needs their review, and ask them to approve. Use only the data given."""
 
 
 def coordinator(state: dict, config: dict) -> dict:
@@ -118,10 +119,16 @@ def _retry(state: dict, issues: list, rnd: int) -> dict:
 def _finish(state: dict, llm, flags: list) -> dict:
     """Merge the results into one summary for the rep and wait for approval."""
     plan = state["plan"]
-    unavailable = [v["full_name"] for v in plan["visits"]
-                   if state.get("briefs", {}).get(v["provider_id"], {}).get("status") == "unavailable"]
-    data = {"visits": plan["visits"], "reason": plan.get("reason"), "unavailable": unavailable, "flags": flags}
-    message = llm.complete("summary", SUMMARY_SYSTEM, str(data), data=data)
+    partial = [v["full_name"] for v in plan["visits"]
+               if state.get("briefs", {}).get(v["provider_id"], {}).get("status") == "partial"]
+    data = {"visits": plan["visits"], "reason": plan.get("reason"), "partial": partial, "flags": flags,
+            "drive_estimated": plan.get("drive_estimated", False),
+            "warnings": state.get("compliance", {}).get("warnings", [])}
+    try:
+        message = llm.complete("summary", SUMMARY_SYSTEM, str(data), data=data)
+    except Exception as e:  # model down: the rep still gets the plan, without the written summary
+        log.warning("summary unavailable: %s", e)
+        message = "Written summary unavailable (model down). " + plain_summary(data)
     line = f"coordinator: done, {len(plan['visits'])} call(s) proposed, {len(flags)} flag(s) for the rep"
     log.info(line)
     return {"next": "end", "status": "awaiting_approval", "flags": flags, "message": message, "trace": [line]}

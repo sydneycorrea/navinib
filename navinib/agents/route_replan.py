@@ -31,8 +31,11 @@ def route_replan(state: dict, config: dict) -> dict:
         plan = _morning(con, req, state["schedule"], state["targets"]["ranked"], drive, exclude)
     plan["round"] = state.get("round", 0)
     plan["refill"] = state.get("refill", {}).get("round", 0)
+    # Live road times missing (no OSRM cache, or a pair not in it): the plan says its times are estimates.
+    plan["drive_estimated"] = drive.is_estimate
     line = (f"route_replan ({req['flow']}): {len(plan['visits'])} new call(s): "
-            + ("; ".join(f"{v['start']} {v['full_name']}" for v in plan["visits"]) or "none"))
+            + ("; ".join(f"{v['start']} {v['full_name']}" for v in plan["visits"]) or "none")
+            + (" (drive times estimated)" if plan["drive_estimated"] else ""))
     log.info(line)
     return {"plan": plan, "trace": [line]}
 

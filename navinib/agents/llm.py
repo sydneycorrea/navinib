@@ -50,18 +50,31 @@ class StubLLM:
         return "PASS"
 
     def _summary(self, d: dict) -> str:
-        """One plain paragraph for the rep: what's planned, what needs a look."""
-        visits = d["visits"]
-        what = "; ".join(f"{v['start']} {'visit' if v['call_type'] == 'face_to_face' else 'call'} "
-                         f"{v['full_name']}" for v in visits) or "no new calls"
-        text = f"Proposed: {what}."
-        if d.get("reason"):
-            text += f" Why: {d['reason']}."
-        if d.get("unavailable"):
-            text += f" Brief unavailable for {', '.join(d['unavailable'])}."
-        if d.get("flags"):
-            text += f" Needs your review: {len(d['flags'])} compliance issue(s) not fixed automatically."
-        return text + " Approve to book."
+        """The stub's summary is the plain one."""
+        return plain_summary(d)
+
+
+def plain_summary(d: dict) -> str:
+    """One plain paragraph for the rep, built in code: what's planned and what needs a look.
+
+    Also the fallback when the model is down, so the rep always gets the plan.
+    """
+    visits = d["visits"]
+    what = "; ".join(f"{v['start']} {'visit' if v['call_type'] == 'face_to_face' else 'call'} "
+                     f"{v['full_name']}" for v in visits) or "no new calls"
+    text = f"Proposed: {what}."
+    if d.get("reason"):
+        text += f" Why: {d['reason']}."
+    if d.get("drive_estimated"):
+        text += " Drive times are estimates (live road times unavailable)."
+    if d.get("partial"):
+        text += (f" Partial brief for {', '.join(d['partial'])}: label and trial sources unavailable, "
+                 "so no product claims.")
+    for w in d.get("warnings", []):
+        text += f" Note: {w}."
+    if d.get("flags"):
+        text += f" Needs your review: {len(d['flags'])} compliance issue(s) not fixed automatically."
+    return text + " Approve to book."
 
 
 CITATION = re.compile(r"\[([^\]]+)\]")
