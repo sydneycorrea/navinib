@@ -32,3 +32,10 @@ ALERT_SUPPRESS_BELOW = 5
 # Route planning
 VISIT_MIN = 30          # default length of an in-person call
 PREP_BUFFER_MIN = 60    # time kept free before a booked call to prep and drive (Checkpoint 2.1)
+
+# Tree-of-Thought replan (Checkpoint 4.1)
+PHONE_MIN = 15          # length of a phone call
+TOT_BEAM_WIDTH = 3      # partial plans of each shape kept at each level of the tree
+TOT_MAX_STEPS = 3       # most calls (visits + phone) added to one open window
+TOT_DRIVE_COST = 0.005  # value lost per minute of driving, so shorter routes win ties
+TOT_MAX_PHONE = 1       # phone calls per window; phone is a fallback for providers a visit can't reach
