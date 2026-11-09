@@ -36,7 +36,7 @@ AGENTS = {a.name: a for a in [
     AgentSpec("brief", "Brief",
               "Write a short pre-call brief for each new call, using only retrieved, cited sources.",
               ("build_brief", "label_lookup", "call_note_recall", "trial_search"), uses_llm=True),
-    AgentSpec("compliance", "Compliance check",
+    AgentSpec("compliance", "Compliance",
               "Check the plan and every brief before the rep sees them: rules first, then the LLM for claims.",
               ("plan_validator",), uses_llm=True),
 ]}

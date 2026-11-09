@@ -1,4 +1,4 @@
-"""Compliance check agent (the Plan validator): rules first, then the LLM for claims.
+"""Compliance agent (the plan validator): rules first, then the LLM for claims.
 
 Every problem names the agent that caused it, so the Coordinator can send the
 work back there. Compliance never edits a plan or a brief itself.

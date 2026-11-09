@@ -26,7 +26,7 @@ Use only the facts in the input. Put the source id in square brackets after each
 Talking points may come only from the approved label (refs starting 'Label') or approved trials.
 Never mention anything listed in do_not_raise; if the provider may ask about it, say to refer
 them to Medical Information. The only drug name you may use is Product X.
-If feedback is given, it is what a compliance check rejected last time: fix exactly that."""
+If feedback is given, it is what Compliance rejected last time: fix exactly that."""
 
 
 def brief(payload: dict, config: dict) -> dict:
