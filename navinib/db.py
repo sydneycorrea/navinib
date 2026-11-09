@@ -104,7 +104,9 @@ CREATE TABLE IF NOT EXISTS plan_decision (       -- long-term memory of accept/e
 def connect(path: Path | str = DB_PATH) -> sqlite3.Connection:
     """Open the SQLite database (creating its folder if needed); rows can be read by column name."""
     Path(path).parent.mkdir(parents=True, exist_ok=True)
-    con = sqlite3.connect(path)
+    # The agent graph runs parallel nodes in worker threads. Python's sqlite3 is built
+    # serialized (threadsafety 3), so one connection may be shared across threads.
+    con = sqlite3.connect(path, check_same_thread=False)
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA foreign_keys = ON")
     return con

@@ -8,7 +8,7 @@ Capstone project for the CMU Agentic AI program. *Navinib is an app, not a medic
 
 ## Status
 
-Phase 1 of the MVP plan (Oct 27 to Nov 2): synthetic data, SQLite, the first tools and the retrieval layer from Checkpoint 3.1.
+Phase 1 (data, tools, retrieval, routing, Tree-of-Thought replan) is done. Phase 2 has started: the five agents from Checkpoint 5.1 run as a LangGraph graph, with a stub LLM until a free model is connected.
 
 | Piece | Status |
 | --- | --- |
@@ -18,8 +18,9 @@ Phase 1 of the MVP plan (Oct 27 to Nov 2): synthetic data, SQLite, the first too
 | Pre-call brief inputs: notes, publications, label points, do-not-raise list, contacts | Done (LLM write-up in phase 2) |
 | Route optimizer (OR-Tools, time windows) + drive-time cache | Done |
 | Tree-of-Thought replan (Checkpoint 4.1) | Done |
-| ReAct planner (LangGraph + free OpenRouter model) | Phase 2 |
-| Multi-agent split | Phase 2 (Module 5) |
+| Multi-agent graph: Coordinator, Targeting, Route and Replan, Brief, Compliance (LangGraph) | Done, with a stub LLM |
+| Free OpenRouter model for Coordinator, Brief and Compliance | Phase 2, next |
+| Coordinator reads free-text requests (ReAct over the allowed steps) | Phase 2 |
 | Plan validator and guardrails | Phase 3 (Module 6) |
 | Streamlit rep app and manager view | Phase 4 |
 | Evaluation vs prompt-only baseline | Phase 5 |
@@ -41,6 +42,16 @@ navinib/
     brief.py           pre-call brief inputs, each with its source id
     route.py           free windows in the day, OR-Tools route with office-hour windows
     drive.py           drive-time cache (OSRM road times, straight-line fallback)
+  agents/              the five agents (Checkpoint 5.1) and the graph that runs them
+    state.py           shared state; each agent may write only its own part
+    specs.py           each agent's role, goal and tools (CrewAI-style)
+    coordinator.py     supervisor: routes work, retries after a compliance fail, summary for the rep
+    targeting.py       ranks providers (no LLM)
+    route_replan.py    morning plan with OR-Tools, cancellation replan with Tree-of-Thought (no LLM)
+    brief.py           one brief per new call, in parallel; "brief unavailable" if retrieval fails
+    compliance.py      plan validator: rules first, then an LLM claims check
+    llm.py             the model interface and a deterministic stub
+    graph.py           LangGraph hub-and-spoke graph; run it from here
   planner/             planning strategies on top of the tools
     tot.py             Tree-of-Thought replan: compares alternative plans for a freed window
   rag/                 retrieval for pre-call briefs
@@ -66,6 +77,8 @@ python -m navinib.tools.drive    # optional, needs internet: cache real road tim
 python -m navinib.tools.route    # the 2.1 replan: 2pm cancels, who fits?
 python -m navinib.planner.tot    # the 4.1 Tree-of-Thought replan: compare plans, pick one, say why
 python -m navinib.planner.tot 12:00  # same, but the rep hears of the cancellation at noon
+python -m navinib.agents.graph morning             # the five agents plan the demo day
+python -m navinib.agents.graph cancel ev-04 14:00  # the agents handle Dr. Smith's 2pm cancellation
 pytest                           # runs the tests
 ```
 
@@ -88,6 +101,16 @@ The scripted demo day (`2026-10-27`) follows the Checkpoint 2.1 example: the rep
 The Tree-of-Thought replan (`python -m navinib.planner.tot`, Checkpoint 4.1) looks past the first fill. It grows a small tree of alternative plans for the 2:00 to 3:30 gap (in-person visits nearby, plus at most one phone call to a provider no visit can reach, such as Hillcrest before it closes), rules out branches that break office hours or the window, ranks the rest with a fixed value function, and keeps the best few of each shape at every level. It chooses two visits, Dr. Lee 2:10 to 2:40 and Dr. Irene Marchetti 2:57 to 3:27 (value 1.39), over phoning Hillcrest and then visiting Dr. Lee (1.20) or Dr. Lee alone (0.73), and prints why.
 
 Drive times use a straight-line estimate until you run `python -m navinib.tools.drive` once with internet access; that saves real road times from the free OSRM service to `data/drive_times.json`, which you can commit so the demo works offline.
+
+## Agents
+
+The multi-agent design from Checkpoint 5.1 runs in `navinib/agents/`. The Coordinator is the hub: every agent reports back to it and it decides what runs next, so no agent calls another.
+
+- **Morning plan:** Coordinator, Targeting, Route and Replan (OR-Tools), Brief (one per new call, in parallel), Compliance, Coordinator.
+- **Cancellation:** the Coordinator cancels the call and skips Targeting; Route and Replan runs the Tree-of-Thought replan; Brief writes only the new briefs; Compliance checks them.
+- **Compliance loop:** a failed check goes back to the agent that caused it, with what was wrong, at most twice. Anything still wrong is flagged to the rep, never silently fixed.
+- **Shared state:** one typed state (`agents/state.py`); each agent may write only its own part, and the graph refuses anything else.
+- **LLM:** a deterministic stub stands in for the model, so the graph and tests run offline. Only the Coordinator (summary), Brief (writing) and Compliance (claims check) use it.
 
 ## License
 

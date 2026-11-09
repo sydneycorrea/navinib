@@ -189,11 +189,13 @@ def start_point(con: sqlite3.Connection, rep_id: str, event: dict, window: dict,
 
 
 def tree_of_thought(con: sqlite3.Connection, rep_id: str, day: str, cancelled_event_id: str,
-                    now_min: int, drive: DriveTimes | None = None, at_location_id: str | None = None) -> dict:
+                    now_min: int, drive: DriveTimes | None = None, at_location_id: str | None = None,
+                    exclude: set[str] | frozenset = frozenset()) -> dict:
     """Replan the window freed by a cancelled call by comparing alternative plans.
 
     now_min is when the rep learns of the cancellation; it can be hours ahead of the
-    call. at_location_id overrides where the rep starts (see start_point).
+    call. at_location_id overrides where the rep starts (see start_point). exclude
+    lists providers to leave out (e.g. one Compliance rejected).
     Returns the chosen plan, the runners-up, the reason for the choice, and a
     per-level trace of what was kept and pruned (for review and the report).
     """
@@ -211,7 +213,7 @@ def tree_of_thought(con: sqlite3.Connection, rep_id: str, day: str, cancelled_ev
                 "alternatives": [], "reason": f"no open window of {config.VISIT_MIN}+ minutes at {hhmm(now_min)}",
                 "trace": [], "drive_source": drive.source}
     start, start_reason = start_point(con, rep_id, event, window, now_min, at_location_id)
-    booked = {e["provider_id"] for e in sched["events"] if e["provider_id"]}
+    booked = {e["provider_id"] for e in sched["events"] if e["provider_id"]} | set(exclude)
     pool = candidates(con, rep_id, day, start, booked, window, drive)
     log.info("tot: %s cancelled at %s, window %s-%s from %s (%s); %d visit and %d phone candidates",
              cancelled_event_id, hhmm(now_min), window["start"], window["end"], start["id"], start_reason,
