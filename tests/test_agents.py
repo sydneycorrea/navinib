@@ -2,11 +2,12 @@
 import pytest
 
 from navinib import config
-from navinib.agents.coordinator import MAX_RETRIES, _retry
-from navinib.agents.graph import NODES, _owned, run
+from navinib.agents.coordinator import MAX_RETRIES, _retry, approve_plan
+from navinib.agents.graph import NODES, _owned, brief_next_call, run
 from navinib.agents.llm import StubLLM, citations
 from navinib.agents.specs import AGENTS
 from navinib.tools.drive import DriveTimes, build_cache
+from navinib.tools.schedule import to_min
 
 retrieval = pytest.importorskip("navinib.rag.retrieval")
 
@@ -64,38 +65,65 @@ def _agents_in(trace):
     return [line.split(" ")[0].rstrip(":") for line in trace]
 
 
-def test_morning_plan_runs_the_agents_in_order(con, col, drive):
-    """Morning: Coordinator -> Targeting -> Route -> one Brief per call -> Compliance -> Coordinator."""
+def _briefed(con):
+    """Event ids that have a saved brief."""
+    return {r[0] for r in con.execute("SELECT event_id FROM call_brief")}
+
+
+def test_morning_plan_has_no_briefs_until_approved(con, col, drive):
+    """Morning: Coordinator -> Targeting -> Route -> Compliance (providers and times) -> rep. No brief written."""
     final = run(con, MORNING, col=col, drive=drive)
-    agents = _agents_in(final["trace"])
-    calls = len(final["plan"]["visits"])
-    assert calls >= 1
-    assert agents == (["coordinator", "targeting", "coordinator", "route_replan", "coordinator"] + ["brief"] * calls
-                      + ["coordinator", "compliance", "coordinator"])
-    assert final["status"] == "awaiting_approval" and final["compliance"]["passed"]
-    assert all(final["briefs"][v["provider_id"]]["status"] == "ok" for v in final["plan"]["visits"]), final["briefs"]
+    assert _agents_in(final["trace"]) == ["coordinator", "targeting", "coordinator", "route_replan", "coordinator",
+                                          "compliance", "coordinator"]
+    assert final["plan"]["visits"] and final["status"] == "awaiting_approval" and final["compliance"]["passed"]
+    assert not final.get("briefs") and _briefed(con) == set()
 
 
 def test_cancellation_skips_targeting_and_uses_tot(con, col, drive):
-    """Cancellation: the call is cancelled, Targeting is skipped, ToT replans, briefs only for the new calls."""
+    """Cancellation: the call is cancelled, Targeting is skipped, ToT replans, and no brief is written yet."""
     final = run(con, CANCEL, col=col, drive=drive)
     assert "targeting" not in _agents_in(final["trace"]) and "targets" not in final
     assert final["plan"]["flow"] == "cancellation" and final["plan"]["reason"]
     assert con.execute("SELECT status FROM schedule_event WHERE event_id = 'ev-04'").fetchone()[0] == "cancelled"
-    assert set(final["briefs"]) == {v["provider_id"] for v in final["plan"]["visits"]}
+    assert not final.get("briefs")
 
 
-def test_retrieval_down_gives_a_partial_brief_from_structured_data(con):
-    """No retrieval index: every call stays in the plan with a partial brief that says why the provider
-    matters but makes no product claims, and the rep is told which briefs are partial.
+def test_brief_next_call_writes_one_brief_when_the_prep_hour_starts(con, col):
+    """Dr. Okafor is at 8:45, so his prep hour starts at 7:45: nothing at 7:30, his brief at 7:50, nothing after."""
+    assert brief_next_call(con, "rep-01", config.DEMO_DATE, to_min("07:30"), col=col)["status"] == "nothing_due"
+    final = brief_next_call(con, "rep-01", config.DEMO_DATE, to_min("07:50"), col=col)
+    assert final["status"] == "brief_ready" and set(final["briefs"]) == {"p-004"}
+    assert _briefed(con) == {"ev-02"}
+    again = brief_next_call(con, "rep-01", config.DEMO_DATE, to_min("07:55"), col=col)
+    assert again["status"] == "nothing_due" and not again.get("briefs")   # never written twice
 
-    Uses the committed road times, so the 2pm replan picks Dr. Lee (as in the ToT tests).
-    """
+
+def test_a_cancelled_call_never_gets_a_brief(con, col, drive):
+    """Dr. Smith's 2pm cancels at 13:05, inside its prep hour: no brief for it. After the rep approves the
+    replan, only the next-in-line replacement is briefed."""
+    final = run(con, {**CANCEL, "now_min": to_min("13:05")}, col=col, drive=drive)
+    assert brief_next_call(con, "rep-01", config.DEMO_DATE, to_min("13:05"), col=col)["status"] == "nothing_due"
+    booked = approve_plan(con, final)
+    first = brief_next_call(con, "rep-01", config.DEMO_DATE, to_min("13:05"), col=col)
+    assert first["status"] == "brief_ready" and _briefed(con) == {booked[0]}
+    assert "ev-04" not in _briefed(con)
+
+
+def _approve_2pm_replan(con, col):
+    """Cancel the 2pm on arrival with the committed road times and book the replan (Dr. Lee 14:10, Marchetti)."""
     drive = DriveTimes()
     if drive.source != "osrm":
         pytest.skip("needs the committed OSRM drive-time cache")
-    final = run(con, CANCEL, col=None, drive=drive)
-    assert final["plan"]["visits"]
+    final = run(con, CANCEL, col=col, drive=drive)
+    approve_plan(con, final)
+    return final
+
+
+def test_retrieval_down_gives_a_partial_brief_from_structured_data(con):
+    """No retrieval index: the due call gets a partial brief that says why the provider matters but
+    makes no product claims, and the rep is told it is partial."""
+    _approve_2pm_replan(con, None)
+    final = brief_next_call(con, "rep-01", config.DEMO_DATE, to_min("14:00"), col=None)
     lee = final["briefs"][LEE]
     assert lee["status"] == "partial" and "retrieval failed" in lee["why"]
     assert "label and trial sources unavailable" in lee["text"]
@@ -103,8 +131,7 @@ def test_retrieval_down_gives_a_partial_brief_from_structured_data(con):
     assert "2026-10-14 phone (completed)" in lee["text"]                 # recent calls
     assert "Kevin Tran (lab technician)" in lee["text"]
     assert citations(lee["text"]) == [] and "Product X" not in lee["text"]
-    assert final["compliance"]["passed"]
-    assert "Partial brief for" in final["message"] and final["status"] == "awaiting_approval"
+    assert final["compliance"]["passed"] and "It is partial" in final["message"]
 
 
 class DownLLM(StubLLM):
@@ -115,12 +142,14 @@ class DownLLM(StubLLM):
         raise ConnectionError("model offline")
 
 
-def test_model_down_still_gives_the_rep_the_plan(con, col, drive):
-    """Model down: partial briefs, the claims check is skipped with a warning, and the summary is built in code."""
+def test_model_down_still_gives_the_rep_the_plan_and_a_partial_brief(con, col, drive):
+    """Model down: the plan summary is built in code, and the due call gets a partial brief."""
     final = run(con, CANCEL, col=col, llm=DownLLM(), drive=drive)
     assert final["plan"]["visits"] and final["status"] == "awaiting_approval"
-    assert all(b["status"] == "partial" and "model unavailable" in b["why"] for b in final["briefs"].values())
     assert final["message"].startswith("Written summary unavailable (model down). Proposed:")
+    approve_plan(con, final)
+    b = brief_next_call(con, "rep-01", config.DEMO_DATE, to_min("14:00"), col=col, llm=DownLLM())
+    assert all(x["status"] == "partial" and "model unavailable" in x["why"] for x in b["briefs"].values())
 
 
 def test_estimated_drive_times_are_labeled(con, col, tmp_path):
@@ -130,21 +159,21 @@ def test_estimated_drive_times_are_labeled(con, col, tmp_path):
     assert "Drive times are estimates" in final["message"]
 
 
-def test_compliance_fail_goes_back_to_brief_and_is_fixed(con, col, drive):
-    """A brief that mentions an off-label item is sent back with the problem; the rewrite passes."""
-    final = run(con, MORNING, col=col, llm=LeakyLLM(), drive=drive)
+def test_compliance_fail_goes_back_to_brief_and_is_fixed(con, col):
+    """Dr. Raman's brief (prep hour from 15:30) mentions an off-label item; it is sent back once and the rewrite passes."""
+    final = brief_next_call(con, "rep-01", config.DEMO_DATE, to_min("15:30"), col=col, llm=LeakyLLM())
     assert final["round"] == 1 and final["compliance"]["passed"] and final["flags"] == []
     assert any("compliance round 0: brief" in line and "do-not-raise" in line for line in final["trace"])
-    resent = [p for p, r in final["brief_rounds"].items() if r == 1]
-    assert resent and all(final["briefs"][p]["round"] == 1 for p in resent)
+    assert final["briefs"]["p-006"]["round"] == 1 and _briefed(con) == {"ev-05"}
 
 
-def test_problem_left_after_two_retries_is_flagged_not_hidden(con, col, drive):
+def test_problem_left_after_two_retries_is_flagged_not_hidden(con, col):
     """When the problem won't go away, it is flagged to the rep after MAX_RETRIES, never silently fixed."""
-    final = run(con, CANCEL, col=col, llm=StubbornLLM(), drive=drive)
+    final = brief_next_call(con, "rep-01", config.DEMO_DATE, to_min("15:30"), col=col, llm=StubbornLLM())
     assert final["round"] == MAX_RETRIES and not final["compliance"]["passed"]
     assert final["flags"] and all(f["agent"] == "brief" for f in final["flags"])
     assert "Needs your review" in final["message"]
+    assert con.execute("SELECT status FROM call_brief WHERE event_id = 'ev-05'").fetchone()[0] == "flagged"
 
 
 def test_route_problem_goes_back_to_route_with_the_provider_excluded():

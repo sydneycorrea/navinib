@@ -17,10 +17,11 @@ def merge(old: dict | None, new: dict | None) -> dict:
 
 class NavinibState(TypedDict, total=False):
     """One run of the multi-agent planner, from the rep's request to the plan awaiting approval."""
-    request: dict           # the rep's ask: flow (morning | cancellation), rep_id, day, now_min, event_id, ...
+    request: dict           # the rep's ask: flow (morning | cancellation | brief_next), rep_id, day, now_min, ...
     schedule: dict          # Coordinator: schedule_lookup result (after any cancellation)
     targets: dict           # Targeting: ranked provider locations open today, with reasons, and its refill round
     plan: dict              # Route and Replan: visits (and ToT alternatives), with the round it was made in
+    due: list               # Coordinator: the booked call whose prep hour has started and needs a brief
     briefs: Annotated[dict, merge]   # Brief: {provider_id: brief}, written in parallel
     compliance: dict        # Compliance: passed, issues, and the round it checked
     round: int              # Coordinator: 0, then +1 for each retry after a compliance fail
@@ -30,15 +31,15 @@ class NavinibState(TypedDict, total=False):
     feedback: dict          # Coordinator: what Compliance found, passed back to the agent that caused it
     flags: list             # Coordinator: problems still open after the retries, shown to the rep
     next: str               # Coordinator: the agent to run next
-    status: str             # Coordinator: working | awaiting_approval
+    status: str             # Coordinator: working | awaiting_approval | brief_ready | nothing_due
     message: str            # Coordinator: the summary for the rep
     trace: Annotated[list, operator.add]   # every agent appends what it did, for review and the report
 
 
 # Which part of the state each agent may write (plus 'trace', which everyone appends to).
 OWNS = {
-    "coordinator": {"schedule", "round", "route_round", "refill", "brief_rounds", "feedback", "flags", "next",
-                    "status", "message"},
+    "coordinator": {"schedule", "due", "round", "route_round", "refill", "brief_rounds", "feedback", "flags",
+                    "next", "status", "message"},
     "targeting": {"targets"},
     "route_replan": {"plan"},
     "brief": {"briefs"},

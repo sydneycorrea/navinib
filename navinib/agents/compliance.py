@@ -9,6 +9,7 @@ from datetime import date
 
 from navinib.agents.llm import citations
 from navinib.log import get_logger
+from navinib.tools.schedule import to_min
 
 log = get_logger("navinib.agents.compliance")
 
@@ -18,11 +19,17 @@ Reply with exactly PASS if every statement is supported."""
 
 
 def compliance(state: dict, config: dict) -> dict:
-    """Check the plan's timing and each brief; record the round that was checked."""
+    """Check what this run produced and record the round that was checked.
+
+    A plan run (morning or cancellation) has a plan and no briefs: check providers and
+    times. A brief run has one due call and its brief: check the brief.
+    """
     cfg = config["configurable"]
-    req, plan = state["request"], state["plan"]
-    issues, warnings = _plan_issues(cfg["con"], req["day"], state["schedule"], plan["visits"]), []
-    for v in plan["visits"]:
+    req = state["request"]
+    issues, warnings = [], []
+    if "plan" in state:
+        issues += _plan_issues(cfg["con"], req["day"], state["schedule"], state["plan"]["visits"])
+    for v in state.get("due", []):
         b = state.get("briefs", {}).get(v["provider_id"])
         if b:
             found, warn = _brief_issues(cfg["llm"], v["provider_id"], b)
@@ -42,7 +49,7 @@ def _plan_issues(con: sqlite3.Connection, day: str, schedule: dict, visits: list
     busy = [(e["start_min"], e["end_min"], e["title"]) for e in schedule["events"] if e["status"] != "cancelled"]
     issues = []
     for v in visits:
-        s, e = _minutes(v["start"]), _minutes(v["end"])
+        s, e = to_min(v["start"]), to_min(v["end"])
         if v["call_type"] == "face_to_face":
             h = con.execute("SELECT open_min, close_min FROM location_hours WHERE location_id = ? AND weekday = ?",
                             (v["location_id"], weekday)).fetchone()
@@ -80,7 +87,3 @@ def _brief_issues(llm, pid: str, b: dict) -> tuple[list, list]:
     return issues, []
 
 
-def _minutes(hhmm: str) -> int:
-    """'14:10' -> 850."""
-    h, m = hhmm.split(":")
-    return int(h) * 60 + int(m)

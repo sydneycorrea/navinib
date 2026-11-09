@@ -48,7 +48,7 @@ navinib/
     coordinator.py     supervisor: routes work, retries after a compliance fail, summary for the rep
     targeting.py       ranks providers (no LLM)
     route_replan.py    morning plan with OR-Tools, cancellation replan with Tree-of-Thought (no LLM)
-    brief.py           one brief per new call, in parallel; a partial brief from structured data if retrieval fails
+    brief.py           the brief for the next due call (just in time); a partial brief from structured data if retrieval fails
     compliance.py      plan validator: rules first, then an LLM claims check
     llm.py             the model interface and a deterministic stub
     graph.py           LangGraph hub-and-spoke graph; run it from here
@@ -106,8 +106,9 @@ Drive times use a straight-line estimate until you run `python -m navinib.tools.
 
 The multi-agent design from Checkpoint 5.1 runs in `navinib/agents/`. The Coordinator is the hub: every agent reports back to it and it decides what runs next, so no agent calls another.
 
-- **Morning plan:** Coordinator, Targeting, Route and Replan (OR-Tools), Brief (one per new call, in parallel), Compliance, Coordinator.
-- **Cancellation:** the Coordinator cancels the call and skips Targeting; Route and Replan runs the Tree-of-Thought replan; Brief writes only the new briefs; Compliance checks them.
+- **Morning plan:** Coordinator, Targeting, Route and Replan (OR-Tools), Compliance (providers and times), then the rep approves. No briefs yet.
+- **Cancellation:** the Coordinator cancels the call and skips Targeting; Route and Replan runs the Tree-of-Thought replan; Compliance checks it; the rep approves.
+- **Briefs, just in time:** `brief_next_call(con, rep_id, day, now_min)` runs on a timer or when the rep opens the app. When the prep hour before the next booked call starts, Brief writes that call's brief only and Compliance checks its claims. A brief is saved once per call, and a cancelled call never gets one, so no tokens go to calls that cancel or move.
 - **Two-way links (the only ones):**
   - Route to Targeting, at most once: if the morning route drops providers that don't fit (office hours or drive time) and leaves room in the day, Targeting re-ranks without them and Route runs again.
   - Compliance to the agent that caused a problem, at most twice. Anything still wrong is flagged to the rep, never silently fixed.
@@ -118,7 +119,7 @@ The multi-agent design from Checkpoint 5.1 runs in `navinib/agents/`. The Coordi
   - No live road times: Route uses cached or straight-line times, and the plan says they are estimates.
   - Model down: the rep still gets the ranked plan, with a summary built in code instead of written by the model. If the claims check can't run, the rep sees a warning.
 - **Shared state:** one typed state (`agents/state.py`); each agent may write only its own part, and the graph refuses anything else.
-- **LLM:** a deterministic stub stands in for the model, so the graph and tests run offline. Only the Coordinator (summary), Brief (writing) and Compliance (claims check) use it.
+- **LLM:** a deterministic stub stands in for the model, so the graph and tests run offline. Only the Coordinator (plan summary), Brief (writing) and Compliance (claims check) use it.
 
 ## License
 
