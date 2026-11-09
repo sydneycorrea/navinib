@@ -3,8 +3,8 @@
 Briefs are written just in time, one call ahead, so no tokens go to a call that
 later cancels or moves (Checkpoint 5.1). That gives three flows:
 
-Morning plan:   Targeting -> Route and Replan -> Compliance (providers and times) -> rep approves
-Cancellation:   cancel the call -> Route and Replan (ToT, Targeting skipped) -> Compliance -> rep approves
+Morning plan:   Targeting -> Routing -> Compliance (providers and times) -> rep approves
+Cancellation:   cancel the call -> Routing (ToT, Targeting skipped) -> Compliance -> rep approves
 Brief next:     when the next booked call's brief is due -> Brief (that call only) -> Compliance (claims)
 
 A brief's timing is set per call: it is due at the call's start minus the drive there
@@ -16,8 +16,8 @@ minutes away is briefed earlier than one next door.
 Two links go both ways. If the morning route leaves a window with room for another
 visit after dropping providers that didn't fit (office hours or drive time), the
 Coordinator asks Targeting once for the next candidates, without the dropped ones, and
-reruns Route (at most MAX_REFILLS). A Compliance fail goes back to the agent that caused
-it (Route for times, Brief for claims), at most MAX_RETRIES times; anything still wrong
+reruns Routing (at most MAX_REFILLS). A Compliance fail goes back to the agent that caused
+it (Routing for times, Brief for claims), at most MAX_RETRIES times; anything still wrong
 is flagged to the rep, never silently fixed. Every other handoff is one-way.
 
 The routing is a fixed policy, so the flows are predictable and testable. The LLM
@@ -139,7 +139,7 @@ def _plan_flow(state: dict, cfg: dict) -> dict:
     if plan is None or plan["round"] < state.get("route_round", -1) or plan["refill"] < refill:
         why = ("plan the new calls" if plan is None else f"redo the route (retry {rnd})" if
                plan["round"] < state.get("route_round", -1) else "refill the day with the next candidates")
-        return _go("route_replan", why)
+        return _go("routing", why)
     if req["flow"] == "morning" and refill < MAX_REFILLS and plan["underfilled"] and plan["didnt_fit"]:
         return _refill(plan, refill + 1)
     c = state.get("compliance")
@@ -190,7 +190,7 @@ def _start(con: sqlite3.Connection, req: dict, drive: DriveTimes) -> dict:
         line = (f"coordinator: brief check at {hhmm(req['now_min'])}; {due['start']} {due['full_name']} is "
                 f"{due['drive_min']} min from {due['from']}, brief due {hhmm(due['due_min'])} -> brief")
     else:
-        nxt = "targeting" if req["flow"] == "morning" else "route_replan"
+        nxt = "targeting" if req["flow"] == "morning" else "routing"
         line = (f"coordinator: {req['flow']} request" + (f", {req['event_id']} cancelled" if req.get("event_id")
                                                         else "") + f"; {len(schedule['events'])} events today -> {nxt}")
     log.info(line)
@@ -204,7 +204,7 @@ def _go(agent: str, why: str) -> dict:
 
 
 def _refill(plan: dict, rnd: int) -> dict:
-    """Route left room in the day after dropping providers that didn't fit: ask Targeting for the next ones."""
+    """Routing left room in the day after dropping providers that didn't fit: ask Targeting for the next ones."""
     update = {"refill": {"round": rnd, "exclude": plan["didnt_fit"]}}
     update.update(_go("targeting", f"day underfilled; {', '.join(plan['didnt_fit'])} didn't fit "
                                    f"(refill {rnd} of {MAX_REFILLS})"))
@@ -214,7 +214,7 @@ def _refill(plan: dict, rnd: int) -> dict:
 def _retry(state: dict, issues: list, rnd: int) -> dict:
     """Send each problem back to the agent that caused it, with what Compliance found."""
     brief_fb = {i["provider_id"]: i["problem"] for i in issues if i["agent"] == "brief"}
-    route_ids = sorted({i["provider_id"] for i in issues if i["agent"] == "route_replan"})
+    route_ids = sorted({i["provider_id"] for i in issues if i["agent"] == "routing"})
     fb = dict(state.get("feedback", {}))
     fb["brief"] = {**fb.get("brief", {}), **brief_fb}
     fb["exclude"] = sorted(set(fb.get("exclude", [])) | set(route_ids))
@@ -222,7 +222,7 @@ def _retry(state: dict, issues: list, rnd: int) -> dict:
               "brief_rounds": {**state.get("brief_rounds", {}), **{pid: rnd for pid in brief_fb}}}
     if route_ids:
         update["route_round"] = rnd
-    update.update(_go("route_replan" if route_ids else "brief",
+    update.update(_go("routing" if route_ids else "brief",
                       f"compliance failed; retry {rnd} of {MAX_RETRIES}"))
     return update
 

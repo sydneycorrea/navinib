@@ -30,7 +30,7 @@ AGENTS = {a.name: a for a in [
     AgentSpec("targeting", "Targeting",
               "Rank the providers worth seeing today, with plain reasons for each rank.",
               ("provider_lookup", "provider_scoring"), uses_llm=False),
-    AgentSpec("route_replan", "Route and Replan",
+    AgentSpec("routing", "Routing",
               "Build a drivable plan that fits office hours: OR-Tools for the morning plan, the Tree-of-Thought "
               "replan when a call cancels.", ("free_windows", "plan_route", "tree_of_thought"), uses_llm=False),
     AgentSpec("brief", "Brief",

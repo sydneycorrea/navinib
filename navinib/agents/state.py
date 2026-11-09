@@ -20,13 +20,13 @@ class NavinibState(TypedDict, total=False):
     request: dict           # the rep's ask: flow (morning | cancellation | brief_next), rep_id, day, now_min, ...
     schedule: dict          # Coordinator: schedule_lookup result (after any cancellation)
     targets: dict           # Targeting: ranked provider locations open today, with reasons, and its refill round
-    plan: dict              # Route and Replan: visits (and ToT alternatives), with the round it was made in
-    due: list               # Coordinator: the booked call whose prep hour has started and needs a brief
+    plan: dict              # Routing: visits (and ToT alternatives), with the round it was made in
+    due: list               # Coordinator: the booked call whose brief is due now (start - drive - reading time)
     briefs: Annotated[dict, merge]   # Brief: {provider_id: brief}, written in parallel
     compliance: dict        # Compliance: passed, issues, and the round it checked
     round: int              # Coordinator: 0, then +1 for each retry after a compliance fail
     route_round: int        # Coordinator: the round in which the route must be redone
-    refill: dict            # Coordinator: the one Route -> Targeting round for an underfilled day
+    refill: dict            # Coordinator: the one Routing -> Targeting round for an underfilled day
     brief_rounds: dict      # Coordinator: {provider_id: round} briefs that must be rewritten
     feedback: dict          # Coordinator: what Compliance found, passed back to the agent that caused it
     flags: list             # Coordinator: problems still open after the retries, shown to the rep
@@ -41,7 +41,7 @@ OWNS = {
     "coordinator": {"schedule", "due", "round", "route_round", "refill", "brief_rounds", "feedback", "flags",
                     "next", "status", "message"},
     "targeting": {"targets"},
-    "route_replan": {"plan"},
+    "routing": {"plan"},
     "brief": {"briefs"},
     "compliance": {"compliance"},
 }

@@ -19,7 +19,7 @@ from navinib.agents.brief import brief
 from navinib.agents.compliance import compliance
 from navinib.agents.coordinator import approve_plan, briefs_to_write, coordinator, next_step
 from navinib.agents.llm import LLM, get_llm
-from navinib.agents.route_replan import route_replan
+from navinib.agents.routing import routing
 from navinib.agents.specs import AGENTS
 from navinib.agents.state import NavinibState
 from navinib.agents.targeting import targeting
@@ -28,7 +28,7 @@ from navinib.tools.drive import DriveTimes
 
 log = get_logger("navinib.agents.graph")
 
-NODES = {"coordinator": coordinator, "targeting": targeting, "route_replan": route_replan, "brief": brief,
+NODES = {"coordinator": coordinator, "targeting": targeting, "routing": routing, "brief": brief,
          "compliance": compliance}
 
 
@@ -60,7 +60,7 @@ def build_graph():
     for name, fn in NODES.items():
         g.add_node(name, _owned(name, fn))
     g.add_edge(START, "coordinator")
-    g.add_conditional_edges("coordinator", _route, ["targeting", "route_replan", "brief", "compliance", END])
+    g.add_conditional_edges("coordinator", _route, ["targeting", "routing", "brief", "compliance", END])
     for name in NODES:
         if name != "coordinator":
             g.add_edge(name, "coordinator")

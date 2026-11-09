@@ -8,8 +8,8 @@ log = get_logger("navinib.agents.targeting")
 def targeting(state: dict, config: dict) -> dict:
     """Rank every provider location open today, leaving out providers already booked.
 
-    On a refill round (Route left the day underfilled), it also leaves out the
-    providers Route had to drop, so the next candidates move up.
+    On a refill round (Routing left the day underfilled), it also leaves out the
+    providers Routing had to drop, so the next candidates move up.
     """
     con = config["configurable"]["con"]
     req = state["request"]

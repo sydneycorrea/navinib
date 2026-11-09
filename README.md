@@ -18,7 +18,7 @@ Phase 1 (data, tools, retrieval, routing, Tree-of-Thought replan) is done. Phase
 | Pre-call brief inputs: notes, publications, label points, do-not-raise list, contacts | Done (LLM write-up in phase 2) |
 | Route optimizer (OR-Tools, time windows) + drive-time cache | Done |
 | Tree-of-Thought replan (Checkpoint 4.1) | Done |
-| Multi-agent graph: Coordinator, Targeting, Route and Replan, Brief, Compliance (LangGraph) | Done, with a stub LLM |
+| Multi-agent graph: Coordinator, Targeting, Routing, Brief, Compliance (LangGraph) | Done, with a stub LLM |
 | Free OpenRouter model for Coordinator, Brief and Compliance | Phase 2, next |
 | Coordinator reads free-text requests (ReAct over the allowed steps) | Phase 2 |
 | Plan validator and guardrails | Phase 3 (Module 6) |
@@ -47,7 +47,7 @@ navinib/
     specs.py           each agent's role, goal and tools (CrewAI-style)
     coordinator.py     supervisor: routes work, retries after a compliance fail, summary for the rep
     targeting.py       ranks providers (no LLM)
-    route_replan.py    morning plan with OR-Tools, cancellation replan with Tree-of-Thought (no LLM)
+    routing.py         morning plan with OR-Tools, cancellation replan with Tree-of-Thought (no LLM)
     brief.py           the brief for the next due call (just in time); a partial brief from structured data if retrieval fails
     compliance.py      plan validator: rules first, then an LLM claims check
     llm.py             the model interface and a deterministic stub
@@ -106,17 +106,17 @@ Drive times use a straight-line estimate until you run `python -m navinib.tools.
 
 The multi-agent design from Checkpoint 5.1 runs in `navinib/agents/`. The Coordinator is the hub: every agent reports back to it and it decides what runs next, so no agent calls another.
 
-- **Morning plan:** Coordinator, Targeting, Route and Replan (OR-Tools), Compliance (providers and times), then the rep approves. No briefs yet.
-- **Cancellation:** the Coordinator cancels the call and skips Targeting; Route and Replan runs the Tree-of-Thought replan; Compliance checks it; the rep approves.
+- **Morning plan:** Coordinator, Targeting, Routing (OR-Tools), Compliance (providers and times), then the rep approves. No briefs yet.
+- **Cancellation:** the Coordinator cancels the call and skips Targeting; Routing runs the Tree-of-Thought replan; Compliance checks it; the rep approves.
 - **Briefs, just in time:** `brief_next_call(con, rep_id, day, now_min)` runs on a timer or when the rep opens the app. When the next booked call's brief is due, Brief writes that call's brief only and Compliance checks its claims. The timing is set per call: due = call start - drive there (from the last booked call, or home) - reading time (`BRIEF_READ_MIN`, 15 min), written `BRIEF_GEN_MARGIN_MIN` (5 min) before that, or right away if that time has passed. A call 20 minutes away after a replan is briefed as soon as the rep approves; a call 45 minutes away is briefed earlier than one next door. `PREP_BUFFER_MIN` stays a planning rule, not the brief timer. A brief is saved once per call, and a cancelled call never gets one, so no tokens go to calls that cancel or move.
 - **Two-way links (the only ones):**
-  - Route to Targeting, at most once: if the morning route drops providers that don't fit (office hours or drive time) and leaves room in the day, Targeting re-ranks without them and Route runs again.
+  - Routing to Targeting, at most once: if the morning route drops providers that don't fit (office hours or drive time) and leaves room in the day, Targeting re-ranks without them and Routing runs again.
   - Compliance to the agent that caused a problem, at most twice. Anything still wrong is flagged to the rep, never silently fixed.
 
   Every other handoff is one-way, and its output is still checked by Compliance and approved by the rep.
 - **When something fails:**
   - Retrieval or the model down: Brief writes a partial brief from structured data (why the provider ranked high, goal gap, lab alerts, recent calls, who is at the office). It is marked "label and trial sources unavailable" and makes no product claims.
-  - No live road times: Route uses cached or straight-line times, and the plan says they are estimates.
+  - No live road times: Routing uses cached or straight-line times, and the plan says they are estimates.
   - Model down: the rep still gets the ranked plan, with a summary built in code instead of written by the model. If the claims check can't run, the rep sees a warning.
 - **Shared state:** one typed state (`agents/state.py`); each agent may write only its own part, and the graph refuses anything else.
 - **LLM:** a deterministic stub stands in for the model, so the graph and tests run offline. Only the Coordinator (plan summary), Brief (writing) and Compliance (claims check) use it.

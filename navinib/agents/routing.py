@@ -1,4 +1,4 @@
-"""Route and Replan agent: the morning plan (OR-Tools) and the cancellation replan (Tree-of-Thought).
+"""Routing agent: the morning plan (OR-Tools) and the cancellation replan (Tree-of-Thought).
 
 Merged into one agent (Checkpoint 5.1) because both need the same state: the
 day's schedule, where the rep is, office hours and drive times. No LLM.
@@ -12,14 +12,14 @@ from navinib.tools.drive import DriveTimes
 from navinib.tools.providers import drive_minutes
 from navinib.tools.route import free_windows, plan_route
 
-log = get_logger("navinib.agents.route_replan")
+log = get_logger("navinib.agents.routing")
 
 NEAR_MIN = 20        # morning candidates must be this close to where the window starts
 N_CANDIDATES = 8     # candidates per window handed to OR-Tools
 UNDERFILL_MIN = VISIT_MIN + 15   # idle minutes in a window that could still hold a visit and its drive
 
 
-def route_replan(state: dict, config: dict) -> dict:
+def routing(state: dict, config: dict) -> dict:
     """Plan new calls for the request's flow and record the round the plan was made in."""
     cfg = config["configurable"]
     con, drive = cfg["con"], cfg.get("drive") or DriveTimes()
@@ -33,7 +33,7 @@ def route_replan(state: dict, config: dict) -> dict:
     plan["refill"] = state.get("refill", {}).get("round", 0)
     # Live road times missing (no OSRM cache, or a pair not in it): the plan says its times are estimates.
     plan["drive_estimated"] = drive.is_estimate
-    line = (f"route_replan ({req['flow']}): {len(plan['visits'])} new call(s): "
+    line = (f"routing ({req['flow']}): {len(plan['visits'])} new call(s): "
             + ("; ".join(f"{v['start']} {v['full_name']}" for v in plan["visits"]) or "none")
             + (" (drive times estimated)" if plan["drive_estimated"] else ""))
     log.info(line)

@@ -54,11 +54,11 @@ def _plan_issues(con: sqlite3.Connection, day: str, schedule: dict, visits: list
             h = con.execute("SELECT open_min, close_min FROM location_hours WHERE location_id = ? AND weekday = ?",
                             (v["location_id"], weekday)).fetchone()
             if h is None or s < h["open_min"] or e > h["close_min"]:
-                issues.append({"agent": "route_replan", "provider_id": v["provider_id"],
+                issues.append({"agent": "routing", "provider_id": v["provider_id"],
                                "problem": f"{v['start']}-{v['end']} is outside office hours"})
         for bs, be, title in busy:
             if s < be and bs < e:
-                issues.append({"agent": "route_replan", "provider_id": v["provider_id"],
+                issues.append({"agent": "routing", "provider_id": v["provider_id"],
                                "problem": f"{v['start']}-{v['end']} overlaps {title}"})
         busy.append((s, e, v["full_name"]))
     return issues

@@ -71,9 +71,9 @@ def _briefed(con):
 
 
 def test_morning_plan_has_no_briefs_until_approved(con, col, drive):
-    """Morning: Coordinator -> Targeting -> Route -> Compliance (providers and times) -> rep. No brief written."""
+    """Morning: Coordinator -> Targeting -> Routing -> Compliance (providers and times) -> rep. No brief written."""
     final = run(con, MORNING, col=col, drive=drive)
-    assert _agents_in(final["trace"]) == ["coordinator", "targeting", "coordinator", "route_replan", "coordinator",
+    assert _agents_in(final["trace"]) == ["coordinator", "targeting", "coordinator", "routing", "coordinator",
                                           "compliance", "coordinator"]
     assert final["plan"]["visits"] and final["status"] == "awaiting_approval" and final["compliance"]["passed"]
     assert not final.get("briefs") and _briefed(con) == set()
@@ -213,10 +213,10 @@ def test_problem_left_after_two_retries_is_flagged_not_hidden(con, col):
 
 
 def test_route_problem_goes_back_to_route_with_the_provider_excluded():
-    """A timing problem sends the work to Route and Replan and leaves that provider out next time."""
+    """A timing problem sends the work to Routing and leaves that provider out next time."""
     state = {"request": CANCEL, "round": 0, "plan": {"round": 0, "visits": []}}
-    update = _retry(state, [{"agent": "route_replan", "provider_id": "p-001", "problem": "outside office hours"}], 1)
-    assert update["next"] == "route_replan" and update["route_round"] == 1
+    update = _retry(state, [{"agent": "routing", "provider_id": "p-001", "problem": "outside office hours"}], 1)
+    assert update["next"] == "routing" and update["route_round"] == 1
     assert update["feedback"]["exclude"] == ["p-001"]
 
 
@@ -235,13 +235,13 @@ def test_every_node_has_an_agent_spec():
 
 
 def test_underfilled_day_asks_targeting_once_for_the_next_candidates(con, col, drive, monkeypatch):
-    """Route drops a provider that doesn't fit and leaves the window empty: Targeting is asked once more.
+    """Routing drops a provider that doesn't fit and leaves the window empty: Targeting is asked once more.
 
     Day: office work until 13:00, a call at Dr. Smith's office until 14:00, then free. With one candidate per window,
-    Route only gets Hillcrest, which closes at 14:30 and can't fit. The Coordinator asks Targeting
-    for the next candidates without Hillcrest, Route runs again, and the gap gets a visit.
+    Routing only gets Hillcrest, which closes at 14:30 and can't fit. The Coordinator asks Targeting
+    for the next candidates without Hillcrest, Routing runs again, and the gap gets a visit.
     """
-    from navinib.agents import route_replan as rr
+    from navinib.agents import routing as rr
     monkeypatch.setattr(rr, "N_CANDIDATES", 1)
     d = config.DEMO_DATE
     con.execute("DELETE FROM schedule_event")
@@ -251,7 +251,7 @@ def test_underfilled_day_asks_targeting_once_for_the_next_candidates(con, col, d
                      ("s1", d, 780, 840, "call", "p-003", "L-004", "Smith")])
     final = run(con, MORNING, col=col, drive=drive)
     agents = _agents_in(final["trace"])
-    assert agents.count("targeting") == 2 and agents.count("route_replan") == 2   # one refill round, no more
+    assert agents.count("targeting") == 2 and agents.count("routing") == 2   # one refill round, no more
     assert final["refill"] == {"round": 1, "exclude": [HILLCREST]}
     assert HILLCREST not in {t["provider_id"] for t in final["targets"]["ranked"]}
     after_smith = [v for v in final["plan"]["visits"] if v["start"] >= "14:00"]
