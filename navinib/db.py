@@ -89,7 +89,15 @@ CREATE TABLE IF NOT EXISTS schedule_event (
     provider_id TEXT REFERENCES provider(provider_id),
     location_id TEXT REFERENCES location(location_id),
     title       TEXT NOT NULL,
-    status      TEXT NOT NULL DEFAULT 'planned'  -- planned | cancelled | completed
+    status      TEXT NOT NULL DEFAULT 'planned',  -- planned | cancelled | completed
+    call_type   TEXT NOT NULL DEFAULT 'face_to_face' CHECK (call_type IN ('face_to_face', 'phone'))
+);
+CREATE TABLE IF NOT EXISTS call_brief (           -- briefs written just in time, one per booked call
+    event_id    TEXT PRIMARY KEY REFERENCES schedule_event(event_id),
+    provider_id TEXT NOT NULL REFERENCES provider(provider_id),
+    status      TEXT NOT NULL,                    -- ok | partial | flagged
+    text        TEXT NOT NULL,
+    written_min INTEGER NOT NULL                  -- minutes after midnight when it was written
 );
 CREATE TABLE IF NOT EXISTS plan_decision (       -- long-term memory of accept/edit/reject
     decision_id TEXT PRIMARY KEY,
@@ -104,7 +112,9 @@ CREATE TABLE IF NOT EXISTS plan_decision (       -- long-term memory of accept/e
 def connect(path: Path | str = DB_PATH) -> sqlite3.Connection:
     """Open the SQLite database (creating its folder if needed); rows can be read by column name."""
     Path(path).parent.mkdir(parents=True, exist_ok=True)
-    con = sqlite3.connect(path)
+    # The agent graph runs parallel nodes in worker threads. Python's sqlite3 is built
+    # serialized (threadsafety 3), so one connection may be shared across threads.
+    con = sqlite3.connect(path, check_same_thread=False)
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA foreign_keys = ON")
     return con
