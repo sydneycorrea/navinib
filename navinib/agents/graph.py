@@ -7,7 +7,7 @@ Plans are approved by the rep first; briefs are written just in time, one call a
 Run:
     python -m navinib.agents.graph morning               # plan the demo day
     python -m navinib.agents.graph cancel ev-04 14:00    # Dr. Smith's 2pm cancels on arrival
-    python -m navinib.agents.graph brief 07:50           # brief the next call whose prep hour has started
+    python -m navinib.agents.graph brief 08:20           # brief the next call whose brief time has come
     python -m navinib.agents.graph demo                  # the whole story (regenerates the database)
 """
 import sqlite3
@@ -83,13 +83,14 @@ def run(con: sqlite3.Connection, request: dict, col=None, llm: LLM | None = None
 
 
 def brief_next_call(con: sqlite3.Connection, rep_id: str, day: str, now_min: int, col=None,
-                    llm: LLM | None = None) -> dict:
-    """The just-in-time trigger: brief the next booked call if its prep hour has started.
+                    llm: LLM | None = None, drive: DriveTimes | None = None) -> dict:
+    """The just-in-time trigger: brief the next booked call once its brief time has come.
 
     Call it on a timer (or when the rep opens the app). It writes at most one brief, and
     never one for a cancelled call or a call that already has one.
     """
-    return run(con, {"flow": "brief_next", "rep_id": rep_id, "day": day, "now_min": now_min}, col=col, llm=llm)
+    return run(con, {"flow": "brief_next", "rep_id": rep_id, "day": day, "now_min": now_min}, col=col, llm=llm,
+               drive=drive)
 
 
 def _show(final: dict) -> None:
@@ -116,7 +117,7 @@ if __name__ == "__main__":
     args = sys.argv[1:] or ["morning"]
     day = cfg.DEMO_DATE
     if args[0] == "demo":
-        # Dr. Smith's 2pm cancels at 13:05; the rep approves the replan; briefs follow one call ahead.
+        # Dr. Smith's 2pm cancels at 13:05; the rep approves the replan; each call is briefed when its drive and reading time come up.
         generate()
         con, col = connect(), build_index()
         print("=== 13:05 Dr. Smith's 2pm cancels: replan ===")
@@ -124,13 +125,13 @@ if __name__ == "__main__":
                           "now_min": to_min("13:05")}, col=col)
         _show(final)
         print(f"=== Rep approves: booked {approve_plan(con, final)} ===\n")
-        for t in ["13:05", "13:20", "14:30", "15:30"]:
+        for t in ["13:05", "13:30", "14:05", "15:50"]:
             print(f"=== {t} brief check ===")
             _show(brief_next_call(con, "rep-01", day, to_min(t), col=col))
         written = [r[0] for r in con.execute("SELECT event_id FROM call_brief")]
         print(f"Briefs written today: {written} (none for the cancelled ev-04)")
     elif args[0] == "brief":
-        _show(brief_next_call(connect(), "rep-01", day, to_min(args[1] if len(args) > 1 else "07:50"),
+        _show(brief_next_call(connect(), "rep-01", day, to_min(args[1] if len(args) > 1 else "08:20"),
                               col=build_index()))
     else:
         if args[0] == "cancel":

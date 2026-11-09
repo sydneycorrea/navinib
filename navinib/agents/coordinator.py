@@ -5,8 +5,13 @@ later cancels or moves (Checkpoint 5.1). That gives three flows:
 
 Morning plan:   Targeting -> Route and Replan -> Compliance (providers and times) -> rep approves
 Cancellation:   cancel the call -> Route and Replan (ToT, Targeting skipped) -> Compliance -> rep approves
-Brief next:     when the prep hour before the next booked call starts -> Brief (that call only)
-                -> Compliance (claims)
+Brief next:     when the next booked call's brief is due -> Brief (that call only) -> Compliance (claims)
+
+A brief's timing is set per call: it is due at the call's start minus the drive there
+(from the last booked call before it, or home) minus reading time, and is written
+BRIEF_GEN_MARGIN_MIN before that, or right away if that time has passed. So a call
+20 minutes away after a replan is briefed as soon as the rep approves, and a call 45
+minutes away is briefed earlier than one next door.
 
 Two links go both ways. If the morning route leaves a window with room for another
 visit after dropping providers that didn't fit (office hours or drive time), the
@@ -22,8 +27,9 @@ free-text request and choose among the allowed next steps.
 import sqlite3
 
 from navinib.agents.llm import plain_summary
-from navinib.config import PREP_BUFFER_MIN
+from navinib.config import BRIEF_GEN_MARGIN_MIN, BRIEF_READ_MIN
 from navinib.log import get_logger
+from navinib.tools.drive import DriveTimes
 from navinib.tools.schedule import cancel_event, hhmm, schedule_lookup, to_min
 
 log = get_logger("navinib.agents.coordinator")
@@ -40,7 +46,7 @@ def coordinator(state: dict, config: dict) -> dict:
     """Decide the next step from the state; on the last step, write the result for the rep."""
     cfg = config["configurable"]
     if "schedule" not in state:
-        return _start(cfg["con"], state["request"])
+        return _start(cfg["con"], state["request"], cfg["drive"])
     if state["request"]["flow"] == "brief_next":
         return _brief_flow(state, cfg)
     return _plan_flow(state, cfg)
@@ -59,20 +65,50 @@ def briefs_to_write(state: dict) -> list[dict]:
              "feedback": feedback.get(v["provider_id"])} for v in _briefs_needed(state)]
 
 
-def next_due_call(con: sqlite3.Connection, schedule: dict, now_min: int) -> dict | None:
-    """The next booked call whose prep hour has started and that has no brief yet, or None.
+def brief_timing(con: sqlite3.Connection, rep_id: str, schedule: dict, event: dict, drive: DriveTimes) -> dict:
+    """When a call's brief is due and when to write it: start - drive there - reading time, less a margin.
 
-    Cancelled calls are never due, so a cancelled call never gets a brief.
+    The drive is from the last booked call that ends before this one (cancelled calls
+    don't count), or from home when there is none.
+    """
+    before = [e for e in schedule["events"] if e["kind"] == "call" and e["status"] != "cancelled"
+              and e["location_id"] and e["end_min"] <= event["start_min"] and e["event_id"] != event["event_id"]]
+    origin = before[-1]["location_id"] if before else None
+    drive_min = drive.between(_point(con, rep_id, origin), _point(con, rep_id, event["location_id"]))
+    due = event["start_min"] - drive_min - BRIEF_READ_MIN
+    return {"drive_min": drive_min, "from": origin or "home", "due_min": due, "write_min": due - BRIEF_GEN_MARGIN_MIN}
+
+
+def next_due_call(con: sqlite3.Connection, rep_id: str, schedule: dict, now_min: int,
+                  drive: DriveTimes) -> tuple[dict | None, dict | None]:
+    """The next booked call whose brief should be written now, and the next call still waiting for its time.
+
+    A call is due once now has reached its write time (brief_timing) and it hasn't
+    started. Cancelled calls are never due, and a call with a saved brief is never due again.
     """
     briefed = {r[0] for r in con.execute("SELECT event_id FROM call_brief")}
+    waiting = None
     for e in schedule["events"]:
-        if (e["kind"] == "call" and e["status"] != "cancelled" and e["event_id"] not in briefed
-                and e["start_min"] >= now_min and e["start_min"] - PREP_BUFFER_MIN <= now_min):
-            p = con.execute("SELECT full_name FROM provider WHERE provider_id = ?", (e["provider_id"],)).fetchone()
-            return {"event_id": e["event_id"], "provider_id": e["provider_id"], "full_name": p["full_name"],
-                    "call_type": e["call_type"], "location_id": e["location_id"], "start": e["start"],
-                    "end": e["end"]}
-    return None
+        if e["kind"] != "call" or e["status"] == "cancelled" or e["event_id"] in briefed or e["start_min"] < now_min:
+            continue
+        t = brief_timing(con, rep_id, schedule, e, drive)
+        if t["write_min"] > now_min:
+            waiting = waiting or {"event_id": e["event_id"], "start": e["start"], **t}
+            continue
+        p = con.execute("SELECT full_name FROM provider WHERE provider_id = ?", (e["provider_id"],)).fetchone()
+        return {"event_id": e["event_id"], "provider_id": e["provider_id"], "full_name": p["full_name"],
+                "call_type": e["call_type"], "location_id": e["location_id"], "start": e["start"],
+                "end": e["end"], **t}, waiting
+    return None, waiting
+
+
+def _point(con: sqlite3.Connection, rep_id: str, location_id: str | None) -> dict:
+    """A location as a drive-time point, or the rep's home when there is none."""
+    if location_id:
+        loc = con.execute("SELECT * FROM location WHERE location_id = ?", (location_id,)).fetchone()
+        return {"id": location_id, "lat": loc["lat"], "lon": loc["lon"]}
+    rep = con.execute("SELECT * FROM rep WHERE rep_id = ?", (rep_id,)).fetchone()
+    return {"id": f"home:{rep_id}", "lat": rep["home_lat"], "lon": rep["home_lon"]}
 
 
 def approve_plan(con: sqlite3.Connection, state: dict) -> list[str]:
@@ -133,23 +169,26 @@ def _briefs_needed(state: dict) -> list[dict]:
             if v["provider_id"] not in briefs or briefs[v["provider_id"]]["round"] < redo.get(v["provider_id"], 0)]
 
 
-def _start(con: sqlite3.Connection, req: dict) -> dict:
+def _start(con: sqlite3.Connection, req: dict, drive: DriveTimes) -> dict:
     """First step: record a cancellation if there is one, read the schedule, and pick the first agent."""
     if req["flow"] == "cancellation":
         cancel_event(con, req["event_id"])
     schedule = schedule_lookup(con, req["rep_id"], req["day"])
     update = {"schedule": schedule, "round": 0, "status": "working"}
     if req["flow"] == "brief_next":
-        due = next_due_call(con, schedule, req["now_min"])
+        due, waiting = next_due_call(con, req["rep_id"], schedule, req["now_min"], drive)
         if due is None:
-            line = f"coordinator: brief check at {hhmm(req['now_min'])}; no call is due for a brief"
+            later = (f"; next brief at {hhmm(waiting['write_min'])} for the {waiting['start']} call"
+                     if waiting else "")
+            line = f"coordinator: brief check at {hhmm(req['now_min'])}; no call is due for a brief{later}"
             log.info(line)
-            return {**update, "next": "end", "status": "nothing_due", "message": "No brief due yet.",
-                    "trace": [line]}
+            msg = "No brief due yet." + (f" The next one will be written at {hhmm(waiting['write_min'])}"
+                                         f" for the {waiting['start']} call." if waiting else "")
+            return {**update, "next": "end", "status": "nothing_due", "message": msg, "trace": [line]}
         update["due"] = [due]
         nxt = "brief"
-        line = (f"coordinator: brief check at {hhmm(req['now_min'])}; prep hour started for {due['start']} "
-                f"{due['full_name']} -> brief")
+        line = (f"coordinator: brief check at {hhmm(req['now_min'])}; {due['start']} {due['full_name']} is "
+                f"{due['drive_min']} min from {due['from']}, brief due {hhmm(due['due_min'])} -> brief")
     else:
         nxt = "targeting" if req["flow"] == "morning" else "route_replan"
         line = (f"coordinator: {req['flow']} request" + (f", {req['event_id']} cancelled" if req.get("event_id")

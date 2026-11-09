@@ -31,7 +31,12 @@ ALERT_SUPPRESS_BELOW = 5
 
 # Route planning
 VISIT_MIN = 30          # default length of an in-person call
-PREP_BUFFER_MIN = 60    # time kept free before a booked call to prep and drive (Checkpoint 2.1)
+PREP_BUFFER_MIN = 60    # time kept free before a booked call to prep and drive (Checkpoint 2.1); a planning rule only
+
+# Just-in-time briefs (Checkpoint 5.1): a call's brief is due at its start minus the drive
+# there minus reading time, and is written a few minutes before that.
+BRIEF_READ_MIN = 15     # time the rep needs to read a brief
+BRIEF_GEN_MARGIN_MIN = 5   # head start so the brief is ready when it is due
 
 # Tree-of-Thought replan (Checkpoint 4.1)
 PHONE_MIN = 15          # length of a phone call

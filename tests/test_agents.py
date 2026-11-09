@@ -88,25 +88,61 @@ def test_cancellation_skips_targeting_and_uses_tot(con, col, drive):
     assert not final.get("briefs")
 
 
-def test_brief_next_call_writes_one_brief_when_the_prep_hour_starts(con, col):
-    """Dr. Okafor is at 8:45, so his prep hour starts at 7:45: nothing at 7:30, his brief at 7:50, nothing after."""
-    assert brief_next_call(con, "rep-01", config.DEMO_DATE, to_min("07:30"), col=col)["status"] == "nothing_due"
-    final = brief_next_call(con, "rep-01", config.DEMO_DATE, to_min("07:50"), col=col)
+def test_brief_next_call_writes_one_brief_when_its_time_comes(con, col):
+    """Dr. Okafor is at 8:45, 6 min from home: due 8:24 (start - drive - 15 min reading), written from 8:19.
+    Nothing at 8:10, his brief at 8:20, nothing after."""
+    early = brief_next_call(con, "rep-01", config.DEMO_DATE, to_min("08:10"), col=col)
+    assert early["status"] == "nothing_due" and "written at 08:19 for the 08:45 call" in early["message"]
+    final = brief_next_call(con, "rep-01", config.DEMO_DATE, to_min("08:20"), col=col)
     assert final["status"] == "brief_ready" and set(final["briefs"]) == {"p-004"}
+    assert final["due"][0]["drive_min"] == 6 and final["due"][0]["from"] == "home"
     assert _briefed(con) == {"ev-02"}
-    again = brief_next_call(con, "rep-01", config.DEMO_DATE, to_min("07:55"), col=col)
+    again = brief_next_call(con, "rep-01", config.DEMO_DATE, to_min("08:25"), col=col)
     assert again["status"] == "nothing_due" and not again.get("briefs")   # never written twice
 
 
-def test_a_cancelled_call_never_gets_a_brief(con, col, drive):
-    """Dr. Smith's 2pm cancels at 13:05, inside its prep hour: no brief for it. After the rep approves the
-    replan, only the next-in-line replacement is briefed."""
+def test_a_cancelled_call_never_gets_a_brief_and_the_replan_is_briefed_right_away(con, col):
+    """Dr. Smith's 2pm cancels at 13:05: no brief for it. The first replacement starts at 13:14, 9 min away,
+    so its brief time has already passed and it is written as soon as the rep approves; the next one waits."""
+    drive = DriveTimes()
+    if drive.source != "osrm":
+        pytest.skip("needs the committed OSRM drive-time cache")
     final = run(con, {**CANCEL, "now_min": to_min("13:05")}, col=col, drive=drive)
     assert brief_next_call(con, "rep-01", config.DEMO_DATE, to_min("13:05"), col=col)["status"] == "nothing_due"
     booked = approve_plan(con, final)
     first = brief_next_call(con, "rep-01", config.DEMO_DATE, to_min("13:05"), col=col)
     assert first["status"] == "brief_ready" and _briefed(con) == {booked[0]}
+    assert first["due"][0]["write_min"] < to_min("13:05")              # immediate, not an hour ahead
+    assert brief_next_call(con, "rep-01", config.DEMO_DATE, to_min("13:06"), col=col)["status"] == "nothing_due"
     assert "ev-04" not in _briefed(con)
+
+
+class FixedDrive(DriveTimes):
+    """Every drive takes the same number of minutes."""
+
+    def __init__(self, minutes):
+        """Remember the drive time; there is no cache."""
+        self.minutes, self.source, self.estimated = minutes, "test", 0
+
+    def between(self, a, b):
+        """The fixed drive time (0 to the same place)."""
+        return 0 if a["id"] == b["id"] else self.minutes
+
+
+def test_a_long_drive_gets_its_brief_earlier_than_an_hour_ahead(con, col):
+    """Dr. Okafor's 8:45 call 50 min away: due 7:40 (8:45 - 50 - 15), written from 7:35, which is
+    more than an hour ahead. The same call 5 min away waits until 8:20."""
+    far = FixedDrive(50)
+    assert brief_next_call(con, "rep-01", config.DEMO_DATE, to_min("07:30"), col=col, drive=far)["status"] == \
+        "nothing_due"
+    final = brief_next_call(con, "rep-01", config.DEMO_DATE, to_min("07:35"), col=col, drive=far)
+    assert final["status"] == "brief_ready" and final["due"][0]["due_min"] == to_min("07:40")
+    con.execute("DELETE FROM call_brief")
+    near = FixedDrive(5)
+    assert brief_next_call(con, "rep-01", config.DEMO_DATE, to_min("08:15"), col=col, drive=near)["status"] == \
+        "nothing_due"
+    assert brief_next_call(con, "rep-01", config.DEMO_DATE, to_min("08:20"), col=col, drive=near)["status"] == \
+        "brief_ready"
 
 
 def _approve_2pm_replan(con, col):
@@ -160,8 +196,8 @@ def test_estimated_drive_times_are_labeled(con, col, tmp_path):
 
 
 def test_compliance_fail_goes_back_to_brief_and_is_fixed(con, col):
-    """Dr. Raman's brief (prep hour from 15:30) mentions an off-label item; it is sent back once and the rewrite passes."""
-    final = brief_next_call(con, "rep-01", config.DEMO_DATE, to_min("15:30"), col=col, llm=LeakyLLM())
+    """Dr. Raman's brief (16:30 call, written from 16:03) mentions an off-label item; it is sent back once and the rewrite passes."""
+    final = brief_next_call(con, "rep-01", config.DEMO_DATE, to_min("16:05"), col=col, llm=LeakyLLM())
     assert final["round"] == 1 and final["compliance"]["passed"] and final["flags"] == []
     assert any("compliance round 0: brief" in line and "do-not-raise" in line for line in final["trace"])
     assert final["briefs"]["p-006"]["round"] == 1 and _briefed(con) == {"ev-05"}
@@ -169,7 +205,7 @@ def test_compliance_fail_goes_back_to_brief_and_is_fixed(con, col):
 
 def test_problem_left_after_two_retries_is_flagged_not_hidden(con, col):
     """When the problem won't go away, it is flagged to the rep after MAX_RETRIES, never silently fixed."""
-    final = brief_next_call(con, "rep-01", config.DEMO_DATE, to_min("15:30"), col=col, llm=StubbornLLM())
+    final = brief_next_call(con, "rep-01", config.DEMO_DATE, to_min("16:05"), col=col, llm=StubbornLLM())
     assert final["round"] == MAX_RETRIES and not final["compliance"]["passed"]
     assert final["flags"] and all(f["agent"] == "brief" for f in final["flags"])
     assert "Needs your review" in final["message"]
