@@ -2,8 +2,12 @@
 
 Morning plan:   Targeting -> Route and Replan -> Brief (one per call, in parallel) -> Compliance
 Cancellation:   cancel the call -> Route and Replan (ToT, Targeting skipped) -> Brief (new calls only) -> Compliance
-A Compliance fail goes back to the agent that caused it, at most MAX_RETRIES times;
-anything still wrong is flagged to the rep, never silently fixed.
+Two links go both ways. If the morning route leaves a window with room for another
+visit after dropping providers that didn't fit (office hours or drive time), the
+Coordinator asks Targeting once for the next candidates, without the dropped ones, and
+reruns Route (at most MAX_REFILLS). A Compliance fail goes back to the agent that caused
+it, at most MAX_RETRIES times; anything still wrong is flagged to the rep, never
+silently fixed. Every other handoff is one-way.
 
 The routing is a fixed policy, so the flows are predictable and testable. The LLM
 writes the rep-facing summary; with a real model it will also read the rep's
@@ -15,6 +19,7 @@ from navinib.tools.schedule import cancel_event, schedule_lookup
 log = get_logger("navinib.agents.coordinator")
 
 MAX_RETRIES = 2
+MAX_REFILLS = 1
 
 SUMMARY_SYSTEM = """You are Navinib, a co-pilot for a pharmaceutical field rep. In at most 80 words, tell
 the rep what is proposed for their day and why, mention any brief that is unavailable and any compliance
@@ -27,11 +32,17 @@ def coordinator(state: dict, config: dict) -> dict:
     req = state["request"]
     if "schedule" not in state:
         return _start(cfg["con"], req)
-    if req["flow"] == "morning" and "targets" not in state:
-        return _go("targeting", "rank providers")
+    refill = state.get("refill", {}).get("round", 0)
+    if req["flow"] == "morning" and ("targets" not in state or state["targets"]["refill"] < refill):
+        return _go("targeting", "rank providers" if not refill else "next candidates for the underfilled day")
     rnd = state.get("round", 0)
-    if "plan" not in state or state["plan"]["round"] < state.get("route_round", -1):
-        return _go("route_replan", "plan the new calls" if rnd == 0 else f"redo the route (retry {rnd})")
+    plan = state.get("plan")
+    if plan is None or plan["round"] < state.get("route_round", -1) or plan["refill"] < refill:
+        why = ("plan the new calls" if plan is None else f"redo the route (retry {rnd})" if
+               plan["round"] < state.get("route_round", -1) else "refill the day with the next candidates")
+        return _go("route_replan", why)
+    if req["flow"] == "morning" and refill < MAX_REFILLS and plan["underfilled"] and plan["didnt_fit"]:
+        return _refill(plan, refill + 1)
     if _briefs_needed(state):
         return _go("brief", f"write {len(_briefs_needed(state))} brief(s)")
     c = state.get("compliance")
@@ -78,6 +89,14 @@ def _go(agent: str, why: str) -> dict:
     """Hand the work to one agent."""
     log.info("coordinator -> %s (%s)", agent, why)
     return {"next": agent, "trace": [f"coordinator -> {agent}: {why}"]}
+
+
+def _refill(plan: dict, rnd: int) -> dict:
+    """Route left room in the day after dropping providers that didn't fit: ask Targeting for the next ones."""
+    update = {"refill": {"round": rnd, "exclude": plan["didnt_fit"]}}
+    update.update(_go("targeting", f"day underfilled; {', '.join(plan['didnt_fit'])} didn't fit "
+                                   f"(refill {rnd} of {MAX_REFILLS})"))
+    return update
 
 
 def _retry(state: dict, issues: list, rnd: int) -> dict:

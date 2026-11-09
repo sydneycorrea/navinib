@@ -10,6 +10,8 @@ from navinib.tools.drive import DriveTimes, build_cache
 
 retrieval = pytest.importorskip("navinib.rag.retrieval")
 
+HILLCREST = "p-005"
+
 MORNING = {"flow": "morning", "rep_id": "rep-01", "day": config.DEMO_DATE}
 CANCEL = {"flow": "cancellation", "rep_id": "rep-01", "day": config.DEMO_DATE, "event_id": "ev-04",
           "now_min": 14 * 60}
@@ -128,3 +130,27 @@ def test_every_node_has_an_agent_spec():
     assert set(NODES) == set(AGENTS)
     assert {a.name for a in AGENTS.values() if a.uses_llm} == {"coordinator", "brief", "compliance"}
     assert all(a.role and a.goal and a.tools for a in AGENTS.values())
+
+
+def test_underfilled_day_asks_targeting_once_for_the_next_candidates(con, col, drive, monkeypatch):
+    """Route drops a provider that doesn't fit and leaves the window empty: Targeting is asked once more.
+
+    Day: office work until 13:00, a call at Dr. Smith's office until 14:00, then free. With one candidate per window,
+    Route only gets Hillcrest, which closes at 14:30 and can't fit. The Coordinator asks Targeting
+    for the next candidates without Hillcrest, Route runs again, and the gap gets a visit.
+    """
+    from navinib.agents import route_replan as rr
+    monkeypatch.setattr(rr, "N_CANDIDATES", 1)
+    d = config.DEMO_DATE
+    con.execute("DELETE FROM schedule_event")
+    con.executemany("INSERT INTO schedule_event (event_id, rep_id, date, start_min, end_min, kind, provider_id,"
+                    " location_id, title) VALUES (?, 'rep-01', ?, ?, ?, ?, ?, ?, ?)",
+                    [("s0", d, 480, 780, "task", None, None, "Office work"),
+                     ("s1", d, 780, 840, "call", "p-003", "L-004", "Smith")])
+    final = run(con, MORNING, col=col, drive=drive)
+    agents = _agents_in(final["trace"])
+    assert agents.count("targeting") == 2 and agents.count("route_replan") == 2   # one refill round, no more
+    assert final["refill"] == {"round": 1, "exclude": [HILLCREST]}
+    assert HILLCREST not in {t["provider_id"] for t in final["targets"]["ranked"]}
+    after_smith = [v for v in final["plan"]["visits"] if v["start"] >= "14:00"]
+    assert after_smith and final["status"] == "awaiting_approval"

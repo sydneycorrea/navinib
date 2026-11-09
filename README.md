@@ -108,7 +108,11 @@ The multi-agent design from Checkpoint 5.1 runs in `navinib/agents/`. The Coordi
 
 - **Morning plan:** Coordinator, Targeting, Route and Replan (OR-Tools), Brief (one per new call, in parallel), Compliance, Coordinator.
 - **Cancellation:** the Coordinator cancels the call and skips Targeting; Route and Replan runs the Tree-of-Thought replan; Brief writes only the new briefs; Compliance checks them.
-- **Compliance loop:** a failed check goes back to the agent that caused it, with what was wrong, at most twice. Anything still wrong is flagged to the rep, never silently fixed.
+- **Two-way links (the only ones):**
+  - Route to Targeting, at most once: if the morning route drops providers that don't fit (office hours or drive time) and leaves room in the day, Targeting re-ranks without them and Route runs again.
+  - Compliance to the agent that caused a problem, at most twice. Anything still wrong is flagged to the rep, never silently fixed.
+
+  Every other handoff is one-way, and its output is still checked by Compliance and approved by the rep.
 - **Shared state:** one typed state (`agents/state.py`); each agent may write only its own part, and the graph refuses anything else.
 - **LLM:** a deterministic stub stands in for the model, so the graph and tests run offline. Only the Coordinator (summary), Brief (writing) and Compliance (claims check) use it.
 
