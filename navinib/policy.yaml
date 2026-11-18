@@ -24,7 +24,7 @@ model:
   # OpenRouter allows about 50 free requests a day across all models, too few for the
   # evaluation, so Groq's free tier (about 1,000 a day, no card) goes first when its key is set.
   providers: [groq, openrouter]
-  free_only: true                # the course gives no paid credits; OpenRouter ids must end in ":free"
+  free_only: true                # OpenRouter ids must end in ":free" unless NAVINIB_ALLOW_PAID=1 is set
   cache: true                    # save answers under .cache/llm/ so reruns don't spend the daily quota
   groq:
     preferred:
