@@ -71,7 +71,13 @@ class DriveTimes:
         cache = json.loads(p.read_text()) if p.exists() else {"source": "estimate", "minutes": {}}
         self.source = cache["source"]
         self._minutes = cache["minutes"]
+        self.estimated = 0   # lookups that fell back to the straight-line estimate
         log.info("drive times: %s (%s)", self.source, p if p.exists() else "no cache file")
+
+    @property
+    def is_estimate(self) -> bool:
+        """True when any time given out so far was an estimate rather than a real road time."""
+        return self.source != "osrm" or self.estimated > 0
 
     def between(self, a: dict, b: dict) -> int:
         """a and b are dicts with 'id', 'lat' and 'lon'."""
@@ -80,6 +86,7 @@ class DriveTimes:
         cached = self._minutes.get(a["id"], {}).get(b["id"])
         if cached is None:
             log.debug("no cached time %s -> %s; using estimate", a["id"], b["id"])
+            self.estimated += 1
             return drive_minutes(a["lat"], a["lon"], b["lat"], b["lon"])
         return cached
 

@@ -11,6 +11,12 @@ def hhmm(minutes: int) -> str:
     return f"{minutes // 60:02d}:{minutes % 60:02d}"
 
 
+def to_min(hhmm_text: str) -> int:
+    """'14:10' -> 850, the inverse of hhmm."""
+    h, m = hhmm_text.split(":")
+    return int(h) * 60 + int(m)
+
+
 def schedule_lookup(con: sqlite3.Connection, rep_id: str, day: str) -> dict:
     """The rep's events for one day, in time order, plus where the rep starts (Action 1)."""
     rep = con.execute("SELECT * FROM rep WHERE rep_id = ?", (rep_id,)).fetchone()
@@ -22,6 +28,7 @@ def schedule_lookup(con: sqlite3.Connection, rep_id: str, day: str) -> dict:
     events = [{
         "event_id": r["event_id"], "kind": r["kind"], "title": r["title"],
         "provider_id": r["provider_id"], "location_id": r["location_id"], "status": r["status"],
+        "call_type": r["call_type"],
         "start_min": r["start_min"], "end_min": r["end_min"],
         "start": hhmm(r["start_min"]), "end": hhmm(r["end_min"]),
     } for r in rows]
