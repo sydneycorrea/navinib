@@ -261,7 +261,7 @@ def test_only_free_models_at_low_temperature(monkeypatch):
     with pytest.raises(ValueError):
         OpenRouterLLM("key", "openai/gpt-4o")
     m = OpenRouterLLM("key")
-    assert m.model.endswith(":free") and m.temperature == 0.2
+    assert all(q.endswith(":free") for q in m.queue) and m.temperature == 0.2
     monkeypatch.setenv("OPENROUTER_API_KEY", "sk-test")
     monkeypatch.setattr(llm_mod, "_dotenv", lambda: {})
     assert isinstance(get_llm(), OpenRouterLLM)
@@ -280,3 +280,28 @@ def test_every_run_is_logged_as_json_with_a_trace_id(con, tmp_path):
     assert set(entry["prompts"]) == {"brief", "claims", "summary", "adverse_event"}
     assert entry["lanes"] and entry["trace"]
     assert "Robert Hale" not in entry["request"]["message"] and "448812" not in entry["request"]["message"]
+
+
+def test_a_retired_free_model_is_skipped_for_the_next_one(monkeypatch):
+    """OpenRouter retires free models often: a 404 moves on to the next free model, never a paid one."""
+    m = OpenRouterLLM("key")
+    first, second = m.queue[0], m.queue[1]
+    calls = []
+
+    def fake(model, system, user):
+        calls.append(model)
+        if model == first:
+            raise llm_mod._Skip(f"{model} -> 404: This model is unavailable for free")
+        return "hello"
+    monkeypatch.setattr(m, "_call", fake)
+    assert m.complete("summary", "s", "u") == "hello"
+    assert calls == [first, second] and m.model == second and m.tried == [first]
+    assert m.complete("summary", "s", "u") == "hello" and calls[-1] == second   # stays on the working one
+
+
+def test_when_every_listed_model_fails_it_asks_openrouter_for_free_ones(monkeypatch):
+    m = OpenRouterLLM("key", "only/one:free")
+    monkeypatch.setattr(llm_mod, "free_models", lambda key="": ["only/one:free", "fresh/model:free"])
+    monkeypatch.setattr(m, "_call", lambda model, s, u: "ok" if model == "fresh/model:free"
+                        else (_ for _ in ()).throw(llm_mod._Skip("gone")))
+    assert m.complete("summary", "s", "u") == "ok" and m.model == "fresh/model:free"

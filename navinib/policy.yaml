@@ -22,7 +22,15 @@ limits:
 model:
   provider: openrouter
   free_only: true                # the course gives no paid credits; any model id must end in ":free"
-  default: "meta-llama/llama-3.3-70b-instruct:free"
+  # Tried in order. OpenRouter's free list changes often: a model that is retired, no longer
+  # free or rate-limited is skipped, and when the whole list fails the client asks OpenRouter
+  # for its current free models (python -m navinib.agents.llm --list shows them).
+  preferred:
+    - "deepseek/deepseek-chat-v3.1:free"
+    - "qwen/qwen3-235b-a22b:free"
+    - "mistralai/mistral-small-3.2-24b-instruct:free"
+    - "google/gemma-3-27b-it:free"
+    - "meta-llama/llama-3.3-70b-instruct:free"
   temperature: 0.2
   max_tokens: 600                # token cap per call
   timeout_s: 60
@@ -116,3 +124,4 @@ claims:
     - "\\d+(\\.\\d+)?\\s*%"
   approved_ref_prefixes: ["Label", "NCT-SYN-0001"]
   unsupported_note: "(Could not confirm against the label: check with Medical Information.)"
+  off_label_note: "(Off-label topic: do not discuss; refer questions to Medical Information.)"
