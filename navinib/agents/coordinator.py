@@ -180,6 +180,10 @@ def _screen_request(con: sqlite3.Connection, req: dict, llm) -> dict | None:
     message that reports a possible adverse event or asks about an unapproved use is not
     answered: it is logged and routed out of Navinib (safety reporting, Medical Information).
     """
+    text = req.get("message")
+    stop = _screen_message(con, req, text, llm) if text else None
+    if stop:
+        return stop
     if req.get("flow") not in FLOWS:
         msg = ("I can plan your day, replan after a cancellation, or brief your next call. "
                "Which one do you need?")
@@ -187,9 +191,11 @@ def _screen_request(con: sqlite3.Connection, req: dict, llm) -> dict | None:
     if req["flow"] == "brief_next" and not POLICY["agents"].get("brief", True):
         return _stop("plan_only", "Briefs are turned off (plan-only mode); your plan and route are unchanged.",
                      [("brief", "flag", "Brief agent turned off by the kill switch")])
-    text = req.get("message")
-    if not text:
-        return None
+    return None
+
+
+def _screen_message(con: sqlite3.Connection, req: dict, text: str, llm) -> dict | None:
+    """The rep's own words: an adverse event or an off-label question stops the run, whatever was asked."""
     ref = "msg-" + hashlib.sha1(f"{req['rep_id']}{req['day']}{text}".encode()).hexdigest()[:8]
     found = guardrails.screen(text, llm)
     if found["adverse_event"]:

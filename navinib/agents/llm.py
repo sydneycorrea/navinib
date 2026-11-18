@@ -162,3 +162,13 @@ def get_llm() -> LLM:
     if key:
         return OpenRouterLLM(key, env.get("NAVINIB_MODEL") or None)
     return StubLLM()
+
+
+if __name__ == "__main__":
+    # Smoke test: which model is in use, and does it answer?  python -m navinib.agents.llm
+    model = get_llm()
+    print(f"Model: {model.name}")
+    if isinstance(model, StubLLM):
+        print("No OPENROUTER_API_KEY found (environment, Codespaces secret or .env), so the stub is used.")
+    else:
+        print("Reply:", model.complete("summary", "Reply in five words or fewer.", "Say hello to a field rep."))
