@@ -21,7 +21,7 @@ Phase 1 (data, tools, retrieval, routing, Tree-of-Thought replan) is done. The f
 | Multi-agent graph: Coordinator, Targeting, Routing, Brief, Compliance (LangGraph) | Done, with a stub LLM |
 | Free OpenRouter model for Coordinator, Brief and Compliance | Client done; first live run pending |
 | Guardrails (Checkpoint 6.1): policy file, input checks, claim-by-claim check, escalation, four lanes, JSON run log, kill switches | Done |
-| Streamlit rep app and manager view | Phase 4 |
+| Streamlit app: calendar-style rep day, approval card, lanes, regional manager view | Done |
 | Evaluation vs prompt-only baseline | Phase 5 |
 
 ## Layout
@@ -59,6 +59,7 @@ navinib/
   rag/                 retrieval for pre-call briefs
     corpus.py          fictional Product X label, trials, call notes, provider publications
     retrieval.py       label lookup, trial search, call-note recall, publication search
+app/main.py            Streamlit app: the rep's day and the regional manager view
 tests/                 pytest suite
 ```
 
@@ -82,12 +83,20 @@ python -m navinib.planner.tot 12:00  # same, but the rep hears of the cancellati
 python -m navinib.agents.graph morning             # the five agents plan the demo day
 python -m navinib.agents.graph cancel ev-04 14:00  # the agents handle Dr. Smith's 2pm cancellation
 python -m navinib.agents.graph demo                # the whole day, including the guardrails firing
+streamlit run app/main.py        # the app (rep view and regional manager view)
 pytest                           # runs the tests
 ```
 
 To use a real model, get a free key at [openrouter.ai/keys](https://openrouter.ai/keys) and set `OPENROUTER_API_KEY` as a Codespaces secret, or copy `.env.example` to `.env`. Only free models are allowed (ids ending in `:free`); pick one with `NAVINIB_MODEL` or change the default in `navinib/policy.yaml`. Tests always use the stub.
 
 The first retrieval run downloads the free all-MiniLM-L6-v2 embedding model (about 80 MB).
+
+## App
+
+`streamlit run app/main.py` opens Navinib in the browser (in Codespaces, open the forwarded port 8501). Each browser session works on its own copy of the demo day; **Reset the demo day** starts over.
+
+- **Rep: my day.** A calendar of the day (booked calls, fixed tasks, cancelled calls struck through, proposed calls dashed in green, a red line at the simulated time). Pick the time in the sidebar, then **Plan my day**, **A call cancelled** (pick the call, then replan), or **Brief my next call**. A proposed plan shows why it won, its alternatives, and **Approve and book** / **Reject**. Every answer lists who acts on each output (the four lanes) and has the agent trace. The chat box takes the rep's own words, for example a doctor's question about first-line use (sent to Medical Information) or a side effect a patient had (sent to safety reporting).
+- **Regional manager.** Read-only and team level: tier-A goal coverage, overdue providers, the sample of briefs written, escalations, the rep's approve/reject log and the runs logged in the session.
 
 ## Logs
 
