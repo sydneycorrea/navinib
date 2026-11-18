@@ -4,6 +4,7 @@ The scenarios come from the 6.1 plan: Dr. Lee's office reports a patient hospita
 rash (adverse event, with a patient name to redact), a memo in Dr. Okafor's notes tries to
 steer the model (injection), and a rep asks about first-line use (off-label question).
 """
+import json
 import pytest
 
 from navinib import audit, config, guardrails
@@ -297,6 +298,24 @@ def test_a_retired_free_model_is_skipped_for_the_next_one(monkeypatch):
     assert m.complete("summary", "s", "u") == "hello"
     assert calls == [first, second] and m.model == second and m.tried == [first]
     assert m.complete("summary", "s", "u") == "hello" and calls[-1] == second   # stays on the working one
+
+
+def test_a_model_refused_for_this_client_is_skipped(monkeypatch):
+    """A 403 such as "only available on agentic harnesses" moves on; a 401 (bad key) does not."""
+    import io
+    import urllib.error
+    m = OpenRouterLLM("key", "harness/only:free")
+    monkeypatch.setattr(llm_mod, "free_models", lambda key="": ["harness/only:free", "works/model:free"])
+
+    def fake_open(req, timeout=None):
+        model = json.loads(req.data)["model"]
+        if model == "harness/only:free":
+            raise urllib.error.HTTPError(req.full_url, 403, "Forbidden", {}, io.BytesIO(b"agentic harnesses only"))
+        raise urllib.error.HTTPError(req.full_url, 401, "Unauthorized", {}, io.BytesIO(b"bad key"))
+    monkeypatch.setattr(llm_mod.urllib.request, "urlopen", fake_open)
+    with pytest.raises(RuntimeError, match="401"):
+        m.complete("summary", "s", "u")
+    assert m.tried == ["harness/only:free"] and m.model == "works/model:free"
 
 
 def test_when_every_listed_model_fails_it_asks_openrouter_for_free_ones(monkeypatch):

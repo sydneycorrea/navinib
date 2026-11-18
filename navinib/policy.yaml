@@ -26,6 +26,7 @@ model:
   # free or rate-limited is skipped, and when the whole list fails the client asks OpenRouter
   # for its current free models (python -m navinib.agents.llm --list shows them).
   preferred:
+    - "inclusionai/ling-3.2-flash:free"   # answered the live check on 2026-11-18
     - "deepseek/deepseek-chat-v3.1:free"
     - "qwen/qwen3-235b-a22b:free"
     - "mistralai/mistral-small-3.2-24b-instruct:free"

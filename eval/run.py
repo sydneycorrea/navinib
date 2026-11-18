@@ -364,7 +364,8 @@ def markdown(r: dict) -> str:
     q_full = sum(abs(x["beam"] - x["full"]) < 1e-6 for x in p["quality"])
     lines = [
         "# Navinib evaluation results", "",
-        f"Run {r['at']} · model `{r['model']}` · policy {r['policy_version']} · label {r['label_version']}", "",
+        f"Run {r['at']} · model `{r['model']}` · policy {r['policy_version']} · label {r['label_version']}"
+        + (f" · skipped: {', '.join(r['models_skipped'])}" if r.get("models_skipped") else ""), "",
         "| Metric | Target | Result |", "| --- | --- | --- |",
         f"| Plan feasibility (hours, overlaps, drives) | 100% | {pct(p['feasibility'])} of {p['calls']} proposed calls "
         f"in {len(p['rows'])} scenarios |",
@@ -431,6 +432,8 @@ def main(quick: bool = False) -> dict:
     print("4/4 fallbacks...")
     r["fallbacks"] = fallbacks(col)
     r["seconds"] = round(time.time() - started, 1)
+    r["model"] = llm.name   # the model that actually answered (a skipped model is replaced during the run)
+    r["models_skipped"] = list(getattr(llm, "tried", []))
     (OUT / "results.json").write_text(json.dumps(r, indent=2, default=str), encoding="utf-8")
     md = markdown(r)
     (OUT / "results.md").write_text(md, encoding="utf-8")
