@@ -90,7 +90,9 @@ class OpenRouterLLM:
     """
     URL = "https://openrouter.ai/api/v1/chat/completions"
     MODELS_URL = "https://openrouter.ai/api/v1/models"
-    SKIP = (400, 402, 404, 429, 503)   # retired, not free, rate-limited or overloaded: try the next model
+    # Retired, not free, refused for this client (403, e.g. "only available on agentic harnesses"),
+    # rate-limited, timed out or overloaded: try the next model. 401 (bad key) is not skipped.
+    SKIP = (400, 402, 403, 404, 408, 409, 429, 500, 502, 503, 504)
 
     def __init__(self, api_key: str, model: str | None = None):
         """Use the policy's settings; refuse any model that isn't free."""
@@ -142,6 +144,8 @@ class OpenRouterLLM:
             if e.code in self.SKIP:
                 raise _Skip(msg) from e
             raise RuntimeError(f"OpenRouter {msg}") from e
+        except (TimeoutError, json.JSONDecodeError) as e:
+            raise _Skip(f"{model} -> {type(e).__name__}") from e
         if out.get("error"):
             raise _Skip(f"{model} -> {str(out['error'])[:160]}")
         text = (out.get("choices") or [{}])[0].get("message", {}).get("content")
