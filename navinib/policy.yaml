@@ -1,0 +1,118 @@
+# Navinib guardrail policy (Checkpoint 6.1).
+#
+# Hard limits live here, in configuration and code, not in prompts: a model can be
+# talked out of a prompt rule but cannot use a tool it was never given. In a real
+# company this file is owned by compliance (content rules), sales operations (routing)
+# and IT (model and logging), and every change is reviewed. navinib/config.py reads it;
+# tests/test_guardrails.py checks that the code follows it.
+
+version: "2026-11-18"
+owner: compliance
+
+limits:
+  compliance_retries: 2          # Compliance sends work back at most this many times, then flags it to the rep
+  refill_rounds: 1               # Routing may ask Targeting for more candidates once per run
+  calls_added_per_window: 3      # Tree-of-Thought replan: most calls added to one open window
+  phone_calls_per_window: 1      # phone is a fallback for providers a visit can't reach
+  replan_radius_min: 20          # replan visits only within this many minutes' drive of the rep
+  lab_alert_suppress_below: 5    # smaller provider-level counts show as "<5", so a count never points to a patient
+  close_options_pct: 5           # two best replan options this close in value: flag the choice to the rep
+  graph_steps: 50                # step cap per run (LangGraph recursion limit)
+
+model:
+  provider: openrouter
+  free_only: true                # the course gives no paid credits; any model id must end in ":free"
+  default: "meta-llama/llama-3.3-70b-instruct:free"
+  temperature: 0.2
+  max_tokens: 600                # token cap per call
+  timeout_s: 60
+
+# Kill switch per agent. Turning one off leaves the rest running:
+#   brief: false  -> plan-only mode, no briefs are written
+#   llm: false    -> no model calls; every agent uses its coded fallback (plain summary, partial briefs)
+agents:
+  coordinator: true
+  targeting: true
+  routing: true
+  brief: true
+  compliance: true
+  llm: true
+
+label:
+  current_version: "2026-03-15"  # briefs built on any other label version are blocked
+
+# Pre-generation checks on every rep message and call note. Tuned for recall: a missed
+# adverse event is far worse than a false alarm, so the false-escalation rate is measured.
+adverse_event:
+  route_to: "safety reporting (pharmacovigilance)"
+  keywords:
+    - adverse event
+    - side effect
+    - hospitali
+    - emergency room
+    - "\\ber visit"
+    - severe rash
+    - rash
+    - anaphyla
+    - allergic reaction
+    - died
+    - death
+    - fatal
+    - life-threatening
+    - seizure
+    - febrile neutropenia
+    - grade 4
+    - stopped treatment because
+    - overdose
+    - pregnan
+
+off_label:
+  route_to: "Medical Information"
+  patterns:
+    - first[- ]line
+    - treatment[- ]naive
+    - small cell
+    - combin\w* with immunotherapy
+    - off[- ]label
+    - unapproved
+    - not (yet )?approved
+
+injection:
+  action: quarantine
+  patterns:
+    - ignore (all |any |your )?(previous |prior |above )?(instructions|rules)
+    - disregard (the |your )?(rules|instructions|guidelines|system prompt)
+    - you are now
+    - new instructions
+    - system prompt
+    - act as
+    - do not (tell|mention|report)
+    - override (the )?(compliance|rules|checks)
+    - recommend product x (for|as) first[- ]line
+
+pii:
+  # Redacted before text reaches the model or the logs.
+  patterns:
+    mrn: "\\b(?:MRN|medical record (?:number|no\\.?))[:#\\s]*[A-Z0-9-]{4,}"
+    phone: "\\(?\\b\\d{3}\\)?[-. ]\\d{3}[-. ]\\d{4}\\b"
+    email: "\\b[\\w.+-]+@[\\w-]+\\.[\\w.]+\\b"
+    ssn: "\\b\\d{3}-\\d{2}-\\d{4}\\b"
+    dob: "\\b(?:DOB|date of birth)[:\\s]*\\d{1,2}/\\d{1,2}/\\d{2,4}"
+    patient_name: "\\b(?:[Pp]atient|[Mm]r\\.|[Mm]rs\\.|[Mm]s\\.)\\s+[A-Z][a-z]+\\s+[A-Z][a-z]+"
+
+# Claim-by-claim check (QAG style) on every brief: a sentence about dose, indication or
+# efficacy must cite an approved source, and every number in it must appear in that source.
+claims:
+  claim_words:
+    - "\\bmg\\b"
+    - dose
+    - dosage
+    - indicat
+    - response rate
+    - duration of response
+    - efficacy
+    - effective
+    - survival
+    - "\\d+(\\.\\d+)?\\s*%"
+  approved_ref_prefixes: ["Label", "NCT-SYN-0001"]
+  unsupported_note: "(Could not confirm against the label: check with Medical Information.)"

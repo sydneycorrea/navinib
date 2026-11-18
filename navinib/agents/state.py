@@ -33,13 +33,15 @@ class NavinibState(TypedDict, total=False):
     next: str               # Coordinator: the agent to run next
     status: str             # Coordinator: working | awaiting_approval | brief_ready | nothing_due
     message: str            # Coordinator: the summary for the rep
+    lanes: list             # Coordinator: who acts on each output (auto, rep approves, flag, escalate), Checkpoint 6.1
+    escalations: list       # Coordinator: cases sent out of Navinib (adverse event, off-label question, quarantine)
     trace: Annotated[list, operator.add]   # every agent appends what it did, for review and the report
 
 
 # Which part of the state each agent may write (plus 'trace', which everyone appends to).
 OWNS = {
     "coordinator": {"schedule", "due", "round", "route_round", "refill", "brief_rounds", "feedback", "flags",
-                    "next", "status", "message"},
+                    "next", "status", "message", "lanes", "escalations"},
     "targeting": {"targets"},
     "routing": {"plan"},
     "brief": {"briefs"},

@@ -5,10 +5,19 @@ call keeps its place in the plan with a partial brief built from structured data
 only (why the provider ranked high, goal gap, lab alerts, recent calls, who is at
 the office). It is marked as having no label or trial sources and makes no product
 claims, so nothing in it is unsourced.
+
+Guardrails (Checkpoint 6.1) run around the model call:
+  before  every call note and retrieved passage is screened: personal data redacted,
+          a note with an injected instruction quarantined, a note reporting a possible
+          adverse event escalated to safety reporting and left out; label passages
+          from a superseded label version are dropped
+  after   the claim-by-claim check removes any dose, indication or efficacy sentence
+          that its cited approved source does not support, and says so in the brief
 """
 import json
 import threading
 
+from navinib import guardrails
 from navinib.agents.llm import citations
 from navinib.log import get_logger
 from navinib.tools.brief import build_brief
@@ -42,21 +51,87 @@ def brief(payload: dict, config: dict) -> dict:
     except Exception as e:  # retrieval down: structured facts only
         return _partial(cfg["con"], payload, f"retrieval failed: {e}")
 
-    allowed = sorted({n["ref"] for n in inputs["call_notes"]} | {t["ref"] for t in inputs["talking_points"]}
-                     | {p["pub_id"] for p in inputs["publications"] if p["may_discuss"]})
-    user = json.dumps({"visit": v, "inputs": inputs, "feedback": payload.get("feedback")}, default=str)
+    with _RETRIEVAL:   # escalations share the connection too
+        inputs, checks = _screen_inputs(cfg["con"], cfg["llm"], inputs, payload)
+    sources = {n["ref"]: n["text"] for n in inputs["call_notes"]}
+    sources |= {t["ref"]: t["text"] for t in inputs["talking_points"]}
+    sources |= {t["ref"]: t["text"] for t in inputs.get("trials", []) if t["status"] == "approved"}
+    sources |= {p["pub_id"]: f"{p['title']}. {p.get('abstract') or ''}" for p in inputs["publications"]
+                if p["may_discuss"]}
+    allowed = sorted(sources)
+    model_inputs = {k: v for k, v in inputs.items() if k != "trials"}
+    user = json.dumps({"visit": v, "inputs": model_inputs, "feedback": payload.get("feedback")}, default=str)
     try:
         text = cfg["llm"].complete("brief", SYSTEM, user,
                                    data={"visit": v, "inputs": inputs, "feedback": payload.get("feedback")})
     except Exception as e:  # model down: same structured fallback
-        return _partial(cfg["con"], payload, f"model unavailable: {e}")
-    log.info("brief %s round %d: %d words, cites %s", pid, payload["round"], len(text.split()), citations(text))
-    return {"briefs": {pid: {"status": "ok", "text": text, "allowed_refs": allowed,
-                             "do_not_raise": [d["ref"] for d in inputs["do_not_raise"]], "round": payload["round"]}},
-            "trace": [f"brief {pid}: written (round {payload['round']}, cites {', '.join(citations(text))})"]}
+        return _partial(cfg["con"], payload, f"model unavailable: {e}", checks)
+    text, removed = guardrails.claim_check(text, sources)
+    checks["claims_removed"] = removed
+    log.info("brief %s round %d: %d words, cites %s, %d claim(s) removed", pid, payload["round"],
+             len(text.split()), citations(text), len(removed))
+    extra = _check_line(checks)
+    return {"briefs": {pid: {"status": "ok", "text": text, "allowed_refs": allowed, "sources": sources,
+                             "label_versions": sorted({t["version"] for t in inputs["talking_points"]
+                                                       if t.get("version")}),
+                             "do_not_raise": [d["ref"] for d in inputs["do_not_raise"]], "round": payload["round"],
+                             "checks": checks}},
+            "trace": [f"brief {pid}: written (round {payload['round']}, cites {', '.join(citations(text))})"
+                      + extra]}
 
 
-def _partial(con, payload: dict, why: str) -> dict:
+def _screen_inputs(con, llm, inputs: dict, payload: dict) -> tuple[dict, dict]:
+    """Input guardrails on everything the model will read. Returns the cleaned inputs and what was found."""
+    pid, rep_id = payload["visit"]["provider_id"], payload["rep_id"]
+    checks = {"pii_redacted": [], "quarantined": [], "escalations": [], "superseded_label": []}
+    held = guardrails.quarantined(con)
+    notes = []
+    for n in inputs["call_notes"]:
+        if n["ref"] in held:
+            checks["quarantined"].append(n["ref"])
+            continue
+        found = guardrails.screen(n["text"], llm)
+        if found["injection"]:
+            guardrails.escalate(con, "injection", n["ref"], n["text"], rep_id)
+            checks["quarantined"].append(n["ref"])
+            continue
+        if found["adverse_event"]:
+            e = guardrails.escalate(con, "adverse_event", n["ref"], n["text"], rep_id)
+            checks["escalations"].append({**e, "provider_id": pid, "why": found["adverse_event"]})
+            continue
+        if found["pii"]:
+            checks["pii_redacted"].append(n["ref"])
+        notes.append({**n, "text": found["text"]})
+    points = []
+    for t in inputs["talking_points"]:
+        if guardrails.superseded([t]):
+            checks["superseded_label"].append(t["ref"])
+        elif guardrails.injection(t["text"]):
+            guardrails.escalate(con, "injection", t["ref"], t["text"], rep_id)
+            checks["quarantined"].append(t["ref"])
+        else:
+            points.append(t)
+    return {**inputs, "call_notes": notes, "talking_points": points}, checks
+
+
+def _check_line(checks: dict) -> str:
+    """What the guardrails did, for the trace."""
+    parts = []
+    if checks.get("escalations"):
+        parts.append("escalated " + ", ".join(f"{e['source_ref']} ({e['kind'].replace('_', ' ')})"
+                                             for e in checks["escalations"]))
+    if checks.get("quarantined"):
+        parts.append("quarantined " + ", ".join(checks["quarantined"]))
+    if checks.get("pii_redacted"):
+        parts.append("redacted personal data in " + ", ".join(checks["pii_redacted"]))
+    if checks.get("superseded_label"):
+        parts.append("dropped superseded label passages " + ", ".join(checks["superseded_label"]))
+    if checks.get("claims_removed"):
+        parts.append(f"removed {len(checks['claims_removed'])} unsupported claim(s)")
+    return f"; guardrails: {'; '.join(parts)}" if parts else ""
+
+
+def _partial(con, payload: dict, why: str, checks: dict | None = None) -> dict:
     """A brief from structured data only, for when retrieval or the model is down. It cites nothing and claims nothing."""
     v, day, rep_id = payload["visit"], payload["day"], payload["rep_id"]
     pid = v["provider_id"]
@@ -76,6 +151,8 @@ def _partial(con, payload: dict, why: str) -> dict:
                                                for c in calls) or "none") + ".")
     lines += [f"Also at the office: {c['full_name']} ({c['role'].replace('_', ' ')})." for c in contacts]
     log.warning("brief %s partial: %s", pid, why)
+    checks = checks or {}
     return {"briefs": {pid: {"status": "partial", "text": "\n".join(lines), "why": why, "allowed_refs": [],
-                             "do_not_raise": [], "round": payload["round"]}},
-            "trace": [f"brief {pid}: partial, structured data only ({why})"]}
+                             "sources": {}, "label_versions": [], "do_not_raise": [], "round": payload["round"],
+                             "checks": checks}},
+            "trace": [f"brief {pid}: partial, structured data only ({why})" + _check_line(checks)]}

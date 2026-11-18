@@ -11,10 +11,12 @@ Run:
     python -m navinib.agents.graph demo                  # the whole story (regenerates the database)
 """
 import sqlite3
+import time
 
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Send
 
+from navinib import audit
 from navinib.agents.brief import brief
 from navinib.agents.compliance import compliance
 from navinib.agents.coordinator import approve_plan, briefs_to_write, coordinator, next_step
@@ -23,6 +25,7 @@ from navinib.agents.routing import routing
 from navinib.agents.specs import AGENTS
 from navinib.agents.state import NavinibState
 from navinib.agents.targeting import targeting
+from navinib.config import GRAPH_STEPS
 from navinib.log import get_logger
 from navinib.tools.drive import DriveTimes
 
@@ -68,29 +71,34 @@ def build_graph():
 
 
 def run(con: sqlite3.Connection, request: dict, col=None, llm: LLM | None = None,
-        drive: DriveTimes | None = None) -> dict:
+        drive: DriveTimes | None = None, log_path=None) -> dict:
     """Run one request through the agents and return the final shared state.
 
     request: {'flow': 'morning' | 'cancellation' | 'brief_next', 'rep_id', 'day', and for a
     cancellation 'event_id' and 'now_min' (plus optional 'at_location_id'), for brief_next
     'now_min'}. col is the retrieval index; without it a brief is a partial one from
-    structured data.
+    structured data. An optional 'message' is the rep's own words, screened before any agent runs.
+    Every run is appended to logs/runs.jsonl with a trace id (final['run_id']).
     """
-    config = {"configurable": {"con": con, "col": col, "llm": llm or get_llm(), "drive": drive or DriveTimes()},
-              "recursion_limit": 50}
-    log.info("run %s", request)
-    return build_graph().invoke({"request": request}, config=config)
+    llm = llm or get_llm()
+    run_id, started = audit.new_run_id(), time.time()
+    config = {"configurable": {"con": con, "col": col, "llm": llm, "drive": drive or DriveTimes()},
+              "recursion_limit": GRAPH_STEPS}
+    log.info("run %s %s (model %s)", run_id, request, llm.name)
+    final = build_graph().invoke({"request": request}, config=config)
+    audit.record(run_id, request, final, llm.name, started, log_path)
+    return {**final, "run_id": run_id}
 
 
 def brief_next_call(con: sqlite3.Connection, rep_id: str, day: str, now_min: int, col=None,
-                    llm: LLM | None = None, drive: DriveTimes | None = None) -> dict:
+                    llm: LLM | None = None, drive: DriveTimes | None = None, log_path=None) -> dict:
     """The just-in-time trigger: brief the next booked call once its brief time has come.
 
     Call it on a timer (or when the rep opens the app). It writes at most one brief, and
     never one for a cancelled call or a call that already has one.
     """
     return run(con, {"flow": "brief_next", "rep_id": rep_id, "day": day, "now_min": now_min}, col=col, llm=llm,
-               drive=drive)
+               drive=drive, log_path=log_path)
 
 
 def _show(final: dict) -> None:
@@ -100,6 +108,8 @@ def _show(final: dict) -> None:
         print(f"  {line}")
     for b in final.get("briefs", {}).values():
         print(f"\nBrief [{b['status']}]:\n{b['text']}")
+    for l in final.get("lanes", []):
+        print(f"  [{l['lane_name']}] {l['item']}: {l['why']}")
     print(f"\nStatus: {final['status']}\n{final.get('message', '')}\n")
 
 
@@ -120,6 +130,8 @@ if __name__ == "__main__":
         # Dr. Smith's 2pm cancels at 13:05; the rep approves the replan; each call is briefed when its drive and reading time come up.
         generate()
         con, col = connect(), build_index()
+        print("=== 08:20 brief check (Dr. Okafor's 8:45 call; a memo in his notes tries to steer the model) ===")
+        _show(brief_next_call(con, "rep-01", day, to_min("08:20"), col=col))
         print("=== 13:05 Dr. Smith's 2pm cancels: replan ===")
         final = run(con, {"flow": "cancellation", "rep_id": "rep-01", "day": day, "event_id": "ev-04",
                           "now_min": to_min("13:05")}, col=col)

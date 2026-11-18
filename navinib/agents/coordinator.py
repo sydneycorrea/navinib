@@ -24,18 +24,19 @@ The routing is a fixed policy, so the flows are predictable and testable. The LL
 writes the plan summary for the rep; with a real model it will also read the rep's
 free-text request and choose among the allowed next steps.
 """
+import hashlib
 import sqlite3
 
+from navinib import guardrails
 from navinib.agents.llm import plain_summary
-from navinib.config import BRIEF_GEN_MARGIN_MIN, BRIEF_READ_MIN
+from navinib.config import BRIEF_GEN_MARGIN_MIN, BRIEF_READ_MIN, MAX_REFILLS, MAX_RETRIES, POLICY
 from navinib.log import get_logger
 from navinib.tools.drive import DriveTimes
 from navinib.tools.schedule import cancel_event, hhmm, schedule_lookup, to_min
 
 log = get_logger("navinib.agents.coordinator")
 
-MAX_RETRIES = 2
-MAX_REFILLS = 1
+FLOWS = ("morning", "cancellation", "brief_next")   # the only things the Coordinator will do
 
 SUMMARY_SYSTEM = """You are Navinib, a co-pilot for a pharmaceutical field rep. In at most 80 words, tell
 the rep what is proposed for their day and why, mention estimated drive times, any warning and any
@@ -46,7 +47,8 @@ def coordinator(state: dict, config: dict) -> dict:
     """Decide the next step from the state; on the last step, write the result for the rep."""
     cfg = config["configurable"]
     if "schedule" not in state:
-        return _start(cfg["con"], state["request"], cfg["drive"])
+        stop = _screen_request(cfg["con"], state["request"], cfg["llm"])
+        return stop or _start(cfg["con"], state["request"], cfg["drive"])
     if state["request"]["flow"] == "brief_next":
         return _brief_flow(state, cfg)
     return _plan_flow(state, cfg)
@@ -171,6 +173,46 @@ def _briefs_needed(state: dict) -> list[dict]:
             if v["provider_id"] not in briefs or briefs[v["provider_id"]]["round"] < redo.get(v["provider_id"], 0)]
 
 
+def _screen_request(con: sqlite3.Connection, req: dict, llm) -> dict | None:
+    """Input guardrails on the request, before any agent runs. Returns a final answer to stop, or None to go on.
+
+    A flow the Coordinator doesn't know gets a clarifying question, not a guess. A rep
+    message that reports a possible adverse event or asks about an unapproved use is not
+    answered: it is logged and routed out of Navinib (safety reporting, Medical Information).
+    """
+    if req.get("flow") not in FLOWS:
+        msg = ("I can plan your day, replan after a cancellation, or brief your next call. "
+               "Which one do you need?")
+        return _stop("needs_clarification", msg, [("request", "flag", f"unknown request {req.get('flow')!r}")])
+    if req["flow"] == "brief_next" and not POLICY["agents"].get("brief", True):
+        return _stop("plan_only", "Briefs are turned off (plan-only mode); your plan and route are unchanged.",
+                     [("brief", "flag", "Brief agent turned off by the kill switch")])
+    text = req.get("message")
+    if not text:
+        return None
+    ref = "msg-" + hashlib.sha1(f"{req['rep_id']}{req['day']}{text}".encode()).hexdigest()[:8]
+    found = guardrails.screen(text, llm)
+    if found["adverse_event"]:
+        e = guardrails.escalate(con, "adverse_event", ref, text, req["rep_id"])
+        msg = ("This may be an adverse event, so Navinib won't summarize it. It has been logged for "
+               f"{e['routed_to']}; please also report it through your company's process within one business day.")
+        return _stop("escalated", msg, [("rep message", "escalate", "possible adverse event")], [e])
+    if guardrails.off_label_question(text):
+        e = guardrails.escalate(con, "off_label", ref, text, req["rep_id"])
+        msg = (f"That question is about an unapproved use, so Navinib can't answer it. Refer it to "
+               f"{e['routed_to']}; the request has been logged.")
+        return _stop("escalated", msg, [("rep message", "escalate", "off-label question")], [e])
+    return None
+
+
+def _stop(status: str, message: str, lane_items: list, escalations: list | None = None) -> dict:
+    """End the run before any agent works, with a lane for the rep or the reviewers."""
+    line = f"coordinator: stopped before planning ({status}): {lane_items[0][2]}"
+    log.warning(line)
+    return {"next": "end", "status": status, "message": message, "schedule": {}, "flags": [],
+            "lanes": guardrails.lanes(lane_items), "escalations": escalations or [], "trace": [line]}
+
+
 def _start(con: sqlite3.Connection, req: dict, drive: DriveTimes) -> dict:
     """First step: record a cancellation if there is one, read the schedule, and pick the first agent."""
     if req["flow"] == "cancellation":
@@ -186,7 +228,8 @@ def _start(con: sqlite3.Connection, req: dict, drive: DriveTimes) -> dict:
             log.info(line)
             msg = "No brief due yet." + (f" The next one will be written at {hhmm(waiting['write_min'])}"
                                          f" for the {waiting['start']} call." if waiting else "")
-            return {**update, "next": "end", "status": "nothing_due", "message": msg, "trace": [line]}
+            return {**update, "next": "end", "status": "nothing_due", "message": msg,
+                    "lanes": guardrails.lanes([("brief check", "auto", "no call is due yet")]), "trace": [line]}
         update["due"] = [due]
         nxt = "brief"
         line = (f"coordinator: brief check at {hhmm(req['now_min'])}; {due['start']} {due['full_name']} is "
@@ -240,9 +283,20 @@ def _finish_plan(state: dict, llm, flags: list) -> dict:
     except Exception as e:  # model down: the rep still gets the plan, without the written summary
         log.warning("summary unavailable: %s", e)
         message = "Written summary unavailable (model down). " + plain_summary(data)
+    items = [("ranking and route drafts", "auto", "internal work, kept in the trace"),
+             ("plan", "rep_approves", "every calendar change waits for the rep (autonomy level 2)")]
+    items += [(f"plan: {f['provider_id']}", "flag", f"{f['problem']} (still failing after {MAX_RETRIES} retries)")
+              for f in flags]
+    if plan.get("drive_estimated"):
+        items.append(("drive times", "flag", "estimated, live road times unavailable"))
+    if guardrails.close_options(plan):
+        items.append(("replan choice", "flag", f"two best options within {POLICY['limits']['close_options_pct']}%"
+                                               " of each other: the rep should choose"))
+    items += [("plan", "flag", w) for w in data["warnings"]]
     line = f"coordinator: done, {len(plan['visits'])} call(s) proposed, {len(flags)} flag(s) for the rep"
     log.info(line)
-    return {"next": "end", "status": "awaiting_approval", "flags": flags, "message": message, "trace": [line]}
+    return {"next": "end", "status": "awaiting_approval", "flags": flags, "message": message,
+            "lanes": guardrails.lanes(items), "escalations": [], "trace": [line]}
 
 
 def _finish_brief(state: dict, con: sqlite3.Connection, flags: list) -> dict:
@@ -260,6 +314,22 @@ def _finish_brief(state: dict, con: sqlite3.Connection, flags: list) -> dict:
         message += f" Note: {w}."
     if flags:
         message += f" Needs your review: {len(flags)} compliance issue(s) not fixed automatically."
+    checks = b.get("checks", {})
+    escalations = checks.get("escalations", [])
+    for e in escalations:
+        message += (f" A call note ({e['source_ref']}) mentions a possible adverse event: it was logged for "
+                    f"{e['routed_to']} and left out of the brief. Please also report it through your company's process.")
+    if checks.get("quarantined"):
+        message += f" Held back for admin review: {', '.join(checks['quarantined'])} (instruction-like text)."
+    if checks.get("claims_removed"):
+        message += f" {len(checks['claims_removed'])} statement(s) could not be confirmed against the label and were removed."
+    risky = flags or b["status"] != "ok" or checks.get("claims_removed") or state.get("compliance", {}).get("warnings")
+    items = [(f"brief {v['event_id']}", "flag" if risky else "auto",
+              "needs a look before the call" if risky else "written inside limits and checked by Compliance (level 3)")]
+    items += [(f"note {e['source_ref']}", "escalate", f"possible adverse event -> {e['routed_to']}") for e in escalations]
+    items += [(f"document {r}", "escalate", "instruction-like text, quarantined for admin review")
+              for r in checks.get("quarantined", [])]
     line = f"coordinator: brief for {v['event_id']} saved ({status})"
     log.info(line)
-    return {"next": "end", "status": "brief_ready", "flags": flags, "message": message, "trace": [line]}
+    return {"next": "end", "status": "brief_ready", "flags": flags, "message": message,
+            "lanes": guardrails.lanes(items), "escalations": escalations, "trace": [line]}
