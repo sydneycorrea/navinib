@@ -1,6 +1,6 @@
 """Navinib app: the rep's day and the regional manager's view (Streamlit).
 
-    streamlit run app/main.py
+    python -m streamlit run app/main.py
 
 Rep view: a calendar-style day, the actions a rep takes (plan the morning, report a
 cancellation, brief the next call, ask a question), the plan waiting for approval with

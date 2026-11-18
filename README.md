@@ -83,7 +83,7 @@ python -m navinib.planner.tot 12:00  # same, but the rep hears of the cancellati
 python -m navinib.agents.graph morning             # the five agents plan the demo day
 python -m navinib.agents.graph cancel ev-04 14:00  # the agents handle Dr. Smith's 2pm cancellation
 python -m navinib.agents.graph demo                # the whole day, including the guardrails firing
-streamlit run app/main.py        # the app (rep view and regional manager view)
+python -m streamlit run app/main.py  # the app (rep view and regional manager view)
 pytest                           # runs the tests
 ```
 
@@ -93,7 +93,7 @@ The first retrieval run downloads the free all-MiniLM-L6-v2 embedding model (abo
 
 ## App
 
-`streamlit run app/main.py` opens Navinib in the browser (in Codespaces, open the forwarded port 8501). Each browser session works on its own copy of the demo day; **Reset the demo day** starts over.
+`python -m streamlit run app/main.py` opens Navinib in the browser (in Codespaces, open the forwarded port 8501). Each browser session works on its own copy of the demo day; **Reset the demo day** starts over.
 
 - **Rep: my day.** A calendar of the day (booked calls, fixed tasks, cancelled calls struck through, proposed calls dashed in green, a red line at the simulated time). Pick the time in the sidebar, then **Plan my day**, **A call cancelled** (pick the call, then replan), or **Brief my next call**. A proposed plan shows why it won, its alternatives, and **Approve and book** / **Reject**. Every answer lists who acts on each output (the four lanes) and has the agent trace. The chat box takes the rep's own words, for example a doctor's question about first-line use (sent to Medical Information) or a side effect a patient had (sent to safety reporting).
 - **Regional manager.** Read-only and team level: tier-A goal coverage, overdue providers, the sample of briefs written, escalations, the rep's approve/reject log and the runs logged in the session.
