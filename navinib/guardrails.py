@@ -29,6 +29,7 @@ PII_PATTERNS = {k: re.compile(p) for k, p in POLICY["pii"]["patterns"].items()}
 CLAIM_PATTERNS = [re.compile(p, _I) for p in POLICY["claims"]["claim_words"]]
 APPROVED_PREFIXES = tuple(POLICY["claims"]["approved_ref_prefixes"])
 UNSUPPORTED_NOTE = POLICY["claims"]["unsupported_note"]
+OFF_LABEL_NOTE = POLICY["claims"]["off_label_note"]
 
 AE_SYSTEM = """You screen notes from a pharmaceutical field rep for possible adverse events: any harm,
 side effect, hospital visit or death a patient had while on a medicine. Reply with exactly YES or NO."""
@@ -129,7 +130,7 @@ def claim_check(text: str, sources: dict[str, str]) -> tuple[str, list[dict]]:
                 or _CITE.findall(s) or carried
             carried = refs
             if not is_claim(s):
-                out.append(s)
+                out.append(_mark_off_label(s, sources, refs))
                 continue
             approved = [r for r in refs if r.startswith(APPROVED_PREFIXES)]
             history_only = refs and not approved and all(r in sources for r in refs)
@@ -152,6 +153,20 @@ def claim_check(text: str, sources: dict[str, str]) -> tuple[str, list[dict]]:
                 out.append(s)
         kept.append(" ".join(out))
     return "\n".join(l for l in kept if l.strip()), removed
+
+
+def _mark_off_label(sentence: str, sources: dict, refs: list) -> str:
+    """History that touches an unapproved use (a doctor asked about first-line data) stays, with the referral.
+
+    Found by the evaluation: a call note quoted in a brief can mention an off-label topic
+    without making a claim, so the rep needs the referral right there, not only at the end.
+    """
+    words = off_label_question(sentence)
+    cited = " ".join(sources.get(r, "") for r in refs if r.startswith("Label"))
+    if not words or "Medical Information" in sentence or \
+            all(re.search(re.escape(w), cited, re.IGNORECASE) for w in words):
+        return sentence
+    return f"{sentence} {OFF_LABEL_NOTE}"
 
 
 # ---------- escalation and the four lanes ----------
