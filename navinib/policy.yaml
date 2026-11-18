@@ -20,9 +20,17 @@ limits:
   graph_steps: 50                # step cap per run (LangGraph recursion limit)
 
 model:
-  provider: openrouter
-  free_only: true                # the course gives no paid credits; any model id must end in ":free"
-  # Tried in order. OpenRouter's free list changes often: a model that is retired, no longer
+  # Free providers, tried in order; each is used only if its key is set. Without credits,
+  # OpenRouter allows about 50 free requests a day across all models, too few for the
+  # evaluation, so Groq's free tier (about 1,000 a day, no card) goes first when its key is set.
+  providers: [groq, openrouter]
+  free_only: true                # the course gives no paid credits; OpenRouter ids must end in ":free"
+  cache: true                    # save answers under .cache/llm/ so reruns don't spend the daily quota
+  groq:
+    preferred:
+      - "llama-3.3-70b-versatile"
+      - "llama-3.1-8b-instant"
+  # OpenRouter, tried in order. OpenRouter's free list changes often: a model that is retired, no longer
   # free or rate-limited is skipped, and when the whole list fails the client asks OpenRouter
   # for its current free models (python -m navinib.agents.llm --list shows them).
   preferred:

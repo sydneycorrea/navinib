@@ -18,4 +18,5 @@ def offline(monkeypatch, tmp_path):
     """Tests never call a real model and never write to the real run log."""
     from navinib import audit
     monkeypatch.setenv("OPENROUTER_API_KEY", "")
+    monkeypatch.setenv("GROQ_API_KEY", "")
     monkeypatch.setattr(audit, "RUNS_PATH", tmp_path / "runs.jsonl")
