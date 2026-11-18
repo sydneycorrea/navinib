@@ -8,7 +8,7 @@ Capstone project for the CMU Agentic AI program. *Navinib is an app, not a medic
 
 ## Status
 
-Phase 1 (data, tools, retrieval, routing, Tree-of-Thought replan) is done. The five agents from Checkpoint 5.1 run as a LangGraph graph, and the Checkpoint 6.1 guardrails are built. A free OpenRouter model is used when `OPENROUTER_API_KEY` is set; without it, a deterministic stub runs everything offline.
+Phase 1 (data, tools, retrieval, routing, Tree-of-Thought replan) is done. The five agents from Checkpoint 5.1 run as a LangGraph graph, and the Checkpoint 6.1 guardrails are built. A free model (OpenRouter or Groq) is used when its API key is set; without one, a deterministic stub runs everything offline. See [Running with a real model](#running-with-a-real-model-graders-add-your-own-key).
 
 | Piece | Status |
 | --- | --- |
@@ -19,7 +19,7 @@ Phase 1 (data, tools, retrieval, routing, Tree-of-Thought replan) is done. The f
 | Route optimizer (OR-Tools, time windows) + drive-time cache | Done |
 | Tree-of-Thought replan (Checkpoint 4.1) | Done |
 | Multi-agent graph: Coordinator, Targeting, Routing, Brief, Compliance (LangGraph) | Done, with a stub LLM |
-| Free OpenRouter model for Coordinator, Brief and Compliance | Client done; first live run pending |
+| Free model (OpenRouter, Groq) for Coordinator, Brief and Compliance | Done; live check passed 2026-11-18 |
 | Guardrails (Checkpoint 6.1): policy file, input checks, claim-by-claim check, escalation, four lanes, JSON run log, kill switches | Done |
 | Streamlit rep app and manager view | Phase 4 |
 | Evaluation vs prompt-only baseline | Phase 5 |
@@ -52,7 +52,7 @@ navinib/
     routing.py         morning plan with OR-Tools, cancellation replan with Tree-of-Thought (no LLM)
     brief.py           the brief for the next due call (just in time); a partial brief from structured data if retrieval fails
     compliance.py      plan validator: rules first, then an LLM claims check
-    llm.py             the model interface: free OpenRouter model, deterministic stub, kill switch
+    llm.py             the model interface: free OpenRouter or Groq model, answer cache, stub, kill switch
     graph.py           LangGraph hub-and-spoke graph; run it from here
   planner/             planning strategies on top of the tools
     tot.py             Tree-of-Thought replan: compares alternative plans for a freed window
@@ -85,7 +85,24 @@ python -m navinib.agents.graph demo                # the whole day, including th
 pytest                           # runs the tests
 ```
 
-To use a real model, get a free key at [openrouter.ai/keys](https://openrouter.ai/keys) and set `OPENROUTER_API_KEY` as a Codespaces secret, or copy `.env.example` to `.env`. Only free models are allowed (ids ending in `:free`); pick one with `NAVINIB_MODEL` or change the default in `navinib/policy.yaml`. Tests always use the stub.
+### Running with a real model (graders: add your own key)
+
+**No key is needed to try Navinib.** Without one, a deterministic stub model answers, so the demo, the evaluation, the app and every test run offline. Add a key to see a real model write the briefs and summaries.
+
+1. **Get a free key** from either provider; both work with no paid credits:
+   - **OpenRouter:** sign up at [openrouter.ai](https://openrouter.ai) and create a key at [openrouter.ai/keys](https://openrouter.ai/keys). Navinib uses only free models (ids ending in `:free`).
+   - **Groq** (optional, a second free provider): create a key at [console.groq.com/keys](https://console.groq.com/keys). No card is needed.
+2. **Give Navinib the key**, in one of three ways:
+   - **GitHub Codespaces:** in GitHub go to *Settings → Codespaces → Secrets → New secret*, name it `OPENROUTER_API_KEY` (or `GROQ_API_KEY`), paste the key, and give it access to this repository. Then restart the codespace.
+   - **A `.env` file** (local or Codespaces): `cp .env.example .env`, then paste the key after `OPENROUTER_API_KEY=` (or `GROQ_API_KEY=`). `.env` is git-ignored, so never commit it.
+   - **The shell:** `export OPENROUTER_API_KEY=sk-or-...` (on Windows PowerShell: `$env:OPENROUTER_API_KEY="sk-or-..."`).
+3. **Check it works:** `python -m navinib.agents.llm` prints the model that answered and its reply. If it says the stub is used, the key was not found.
+
+If both keys are set, Groq is tried first and OpenRouter takes over if Groq fails (the order is `model.providers` in `navinib/policy.yaml`).
+
+**Free daily limits.** Without credits, OpenRouter allows about 50 free-model requests a day across all models; adding $10 of credits raises that to 1,000 a day and free models still cost nothing. Groq's free tier allows about 1,000 a day. The demo makes about 14 model calls and the full evaluation about 180, so on a no-credit OpenRouter key use Groq for `python -m eval.run`. When a provider hits its daily limit, Navinib stops calling it and moves to the next provider, or to its coded fallbacks (partial briefs, plain summary). Answers are saved under `.cache/llm/`, so a rerun spends no quota; delete that folder to get fresh answers.
+
+OpenRouter's free models change often. Navinib tries the models listed in `navinib/policy.yaml`, skips any that is retired or refused, then asks OpenRouter which models are free now (`python -m navinib.agents.llm --list` shows them). Pin one with `NAVINIB_MODEL` (OpenRouter) or `NAVINIB_GROQ_MODEL` (Groq). Tests always use the stub.
 
 The first retrieval run downloads the free all-MiniLM-L6-v2 embedding model (about 80 MB).
 
@@ -124,7 +141,7 @@ The multi-agent design from Checkpoint 5.1 runs in `navinib/agents/`. The Coordi
   - No live road times: Routing uses cached or straight-line times, and the plan says they are estimates.
   - Model down: the rep still gets the ranked plan, with a summary built in code instead of written by the model. If the claims check can't run, the rep sees a warning.
 - **Shared state:** one typed state (`agents/state.py`); each agent may write only its own part, and the graph refuses anything else.
-- **LLM:** a free OpenRouter model (temperature 0.2, token cap from the policy) when a key is set, otherwise a deterministic stub, so the graph and tests run offline. Only the Coordinator (plan summary), Brief (writing), Compliance (claims check) and the adverse-event classifier use it.
+- **LLM:** a free OpenRouter or Groq model (temperature 0.2, token cap from the policy) when a key is set, otherwise a deterministic stub, so the graph and tests run offline. Only the Coordinator (plan summary), Brief (writing), Compliance (claims check) and the adverse-event classifier use it.
 
 ## Guardrails
 

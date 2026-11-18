@@ -265,8 +265,13 @@ def test_only_free_models_at_low_temperature(monkeypatch):
     assert all(q.endswith(":free") for q in m.queue) and m.temperature == 0.2
     monkeypatch.setenv("OPENROUTER_API_KEY", "sk-test")
     monkeypatch.setattr(llm_mod, "_dotenv", lambda: {})
-    assert isinstance(get_llm(), OpenRouterLLM)
+    llm = get_llm()
+    assert isinstance(llm, llm_mod.CachedLLM) and isinstance(llm.inner, OpenRouterLLM)
+    monkeypatch.setenv("GROQ_API_KEY", "gsk-test")
+    chain = get_llm().inner
+    assert isinstance(chain, llm_mod.ChainLLM) and [m.provider for m in chain.models] == ["groq", "openrouter"]
     monkeypatch.setenv("OPENROUTER_API_KEY", "")
+    monkeypatch.setenv("GROQ_API_KEY", "")
     assert isinstance(get_llm(), StubLLM)
 
 
@@ -316,6 +321,65 @@ def test_a_model_refused_for_this_client_is_skipped(monkeypatch):
     with pytest.raises(RuntimeError, match="401"):
         m.complete("summary", "s", "u")
     assert m.tried == ["harness/only:free"] and m.model == "works/model:free"
+
+
+def _http_error(code, body, headers=None):
+    import io
+    import urllib.error
+    return urllib.error.HTTPError("https://x", code, "err", headers or {}, io.BytesIO(body.encode()))
+
+
+def test_the_daily_free_limit_stops_at_once_and_the_next_provider_takes_over(monkeypatch):
+    """Every OpenRouter free model shares one daily limit: hitting it must not burn calls on the others."""
+    calls = []
+
+    def fake_open(req, timeout=None):
+        calls.append(json.loads(req.data)["model"])
+        raise _http_error(429, "Rate limit exceeded: free-models-per-day")
+    monkeypatch.setattr(llm_mod.urllib.request, "urlopen", fake_open)
+    router = OpenRouterLLM("key")
+    backup = StubLLM()
+    chain = llm_mod.ChainLLM([router, backup])
+    assert chain.complete("claims", "s", "u") == "PASS"          # answered by the next provider
+    assert len(calls) == 1 and router.exhausted and chain.name == "stub"
+    with pytest.raises(RuntimeError, match="daily free limit"):
+        router.complete("summary", "s", "u")
+    assert len(calls) == 1                     # no more calls once exhausted
+
+
+def test_a_per_minute_rate_limit_waits_and_retries_the_same_model(monkeypatch):
+    m = llm_mod.GroqLLM("key")
+    waits, n = [], {"calls": 0}
+    m.sleep = waits.append
+
+    class Ok:
+        def __enter__(self):
+            import io
+            return io.BytesIO(json.dumps({"choices": [{"message": {"content": "hi"}}]}).encode())
+
+        def __exit__(self, *a):
+            return False
+
+    def fake_open(req, timeout=None):
+        n["calls"] += 1
+        if n["calls"] == 1:
+            raise _http_error(429, "Rate limit reached for tokens per minute", {"retry-after": "2"})
+        return Ok()
+    monkeypatch.setattr(llm_mod.urllib.request, "urlopen", fake_open)
+    assert m.complete("summary", "s", "u") == "hi" and waits == [2.0] and m.tried == []
+
+
+def test_answers_are_cached_so_reruns_spend_no_quota(tmp_path):
+    class Counting:
+        name, n = "fake:model", 0
+
+        def complete(self, task, system, user, data=None):
+            Counting.n += 1
+            return f"answer {Counting.n}"
+    c = llm_mod.CachedLLM(Counting(), tmp_path)
+    assert c.complete("brief", "s", "u") == "answer 1"
+    assert llm_mod.CachedLLM(Counting(), tmp_path).complete("brief", "s", "u") == "answer 1"
+    assert Counting.n == 1 and c.complete("brief", "s", "other") == "answer 2"
 
 
 def test_when_every_listed_model_fails_it_asks_openrouter_for_free_ones(monkeypatch):
