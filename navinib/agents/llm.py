@@ -84,34 +84,39 @@ class DisabledLLM:
 
 
 class OpenRouterLLM:
-    """A free model on OpenRouter, through its OpenAI-compatible chat API. Standard library only.
+    """A model on OpenRouter, through its OpenAI-compatible chat API. Standard library only.
 
     OpenRouter's free models come and go, so the client keeps a list: NAVINIB_MODEL if set,
     then the policy's preferred models, then whatever OpenRouter currently lists as free.
-    A model that is gone, no longer free or refused is skipped for the rest of the run.
-    A per-minute rate limit waits and retries; the account's daily free limit stops the
-    provider at once (every free model shares it, so trying others only wastes calls).
-    Paid models are never used.
+    Each call tries up to MAX_MODELS_PER_CALL models. A model that is gone, not free or refused
+    (400/402/403/404) is dropped for the run; one that is busy, rate-limited upstream or returns
+    no text is only passed over for that call and tried again on the next one. The model that
+    last answered goes first. A per-minute rate limit waits and retries; the account's daily
+    free limit stops the provider at once (every free model shares it).
+    Paid models are refused unless NAVINIB_ALLOW_PAID=1 (the course allows a paid model).
     """
     provider = "openrouter"
     URL = "https://openrouter.ai/api/v1/chat/completions"
     MODELS_URL = "https://openrouter.ai/api/v1/models"
     DISCOVER = True                      # ask the provider for its current free models when the list runs out
-    # Retired, not free, refused for this client (403, e.g. "only available on agentic harnesses"),
-    # rate-limited, timed out or overloaded: try the next model. 401 (bad key) is not skipped.
-    SKIP = (400, 402, 403, 404, 408, 409, 429, 500, 502, 503, 504)
-    RETRIES_429 = 3                      # waits per call on a per-minute rate limit before skipping the model
+    PERMANENT = (400, 402, 403, 404)     # retired, not free, refused for this client: drop for the run
+    TRANSIENT = (408, 409, 429, 500, 502, 503, 504)   # busy or overloaded: pass over for this call only
+    RETRIES_429 = 2                      # waits on a rate limit before passing the model over
+    MAX_MODELS_PER_CALL = 4
 
-    def __init__(self, api_key: str, model: str | None = None):
-        """Use the policy's settings; refuse any model that isn't free."""
+    def __init__(self, api_key: str, model: str | None = None, allow_paid: bool = False):
+        """Use the policy's settings; refuse any model that isn't free unless paid use is allowed."""
         m = POLICY["model"]
+        self.allow_paid = allow_paid
         self.queue = [model] if model else list(self.preferred())
-        bad = [q for q in self.queue if not self.is_free(q)]
+        bad = [q for q in self.queue if not (allow_paid or self.is_free(q))]
         if bad:
-            raise ValueError(f"{bad[0]} is not a free model; policy.yaml allows free models only")
+            raise ValueError(f"{bad[0]} is not a free model; policy.yaml allows free models only "
+                             "(set NAVINIB_ALLOW_PAID=1 to allow a paid one)")
         self.api_key = api_key
         self.temperature, self.max_tokens, self.timeout = m["temperature"], m["max_tokens"], m["timeout_s"]
-        self.tried: list[str] = []
+        self.tried: list[str] = []       # every model that failed at least once (for the report)
+        self.dead: set[str] = set()      # dropped for the rest of the run
         self.discovered = not self.DISCOVER
         self.exhausted = ""              # set when the daily free limit is hit
         self.sleep = time.sleep
@@ -126,8 +131,8 @@ class OpenRouterLLM:
 
     @property
     def model(self) -> str:
-        """The model in use now."""
-        return self.queue[0] if self.queue else "none"
+        """The model in use now: the first one not dropped."""
+        return next((q for q in self.queue if q not in self.dead), "none")
 
     @property
     def name(self) -> str:
@@ -135,20 +140,32 @@ class OpenRouterLLM:
 
     def complete(self, task: str, system: str, user: str, data: dict | None = None) -> str:
         """One chat completion. Retrieved text arrives inside `user` as quoted JSON data, never as instructions."""
-        errors = []
-        while True:
+        errors, now = [], []
+        while len(now) < self.MAX_MODELS_PER_CALL:
             if self.exhausted:
                 raise RuntimeError(self.exhausted)
-            if not self.queue and not self.discovered:
+            cands = [q for q in self.queue if q not in self.dead and q not in now]
+            if not cands:
+                if self.discovered:
+                    break
                 self.discovered = True
-                self.queue = [m for m in free_models(self.api_key) if m not in self.tried]
-            if not self.queue:
-                raise RuntimeError(f"no free {self.provider} model answered: " + "; ".join(errors[-3:]))
+                self.queue += [q for q in free_models(self.api_key) if q not in self.queue]
+                continue
+            model = cands[0]
+            now.append(model)
             try:
-                return self._call(self.queue[0], system, user)
+                text = self._call(model, system, user)
             except _Skip as e:
                 errors.append(str(e))
-                self.tried.append(self.queue.pop(0))
+                if model not in self.tried:
+                    self.tried.append(model)
+                if e.permanent:
+                    self.dead.add(model)
+                continue
+            self.queue.remove(model)
+            self.queue.insert(0, model)  # the model that answered goes first next time
+            return text
+        raise RuntimeError(f"no {self.provider} model answered: " + "; ".join(errors[-3:]))
 
     def _call(self, model: str, system: str, user: str) -> str:
         body = {"model": model, "temperature": self.temperature, "max_tokens": self.max_tokens,
@@ -169,9 +186,11 @@ class OpenRouterLLM:
                     raise RuntimeError(self.exhausted) from e
                 if e.code == 429 and attempt < self.RETRIES_429:
                     wait = e.headers.get("retry-after") if e.headers else None
-                    self.sleep(min(float(wait) if wait and wait.replace(".", "", 1).isdigit() else 10.0, 30.0))
+                    self.sleep(min(float(wait) if wait and wait.replace(".", "", 1).isdigit() else 8.0, 30.0))
                     continue
-                if e.code in self.SKIP:
+                if e.code in self.PERMANENT:
+                    raise _Skip(msg, permanent=True) from e
+                if e.code in self.TRANSIENT:
                     raise _Skip(msg) from e
                 raise RuntimeError(f"{self.provider} {msg}") from e
             except (TimeoutError, json.JSONDecodeError) as e:
@@ -179,7 +198,7 @@ class OpenRouterLLM:
         if out.get("error"):
             raise _Skip(f"{model} -> {str(out['error'])[:160]}")
         text = (out.get("choices") or [{}])[0].get("message", {}).get("content")
-        if not text:
+        if not text:   # e.g. a reasoning model that spent the token cap thinking
             raise _Skip(f"{model} returned no text")
         return text.strip()
 
@@ -262,7 +281,11 @@ class CachedLLM:
 
 
 class _Skip(Exception):
-    """This model can't answer now; try the next free one."""
+    """This model can't answer now; try the next one. `permanent` drops it for the run."""
+
+    def __init__(self, msg: str, permanent: bool = False):
+        super().__init__(msg)
+        self.permanent = permanent
 
 
 def free_models(api_key: str = "") -> list[str]:
@@ -333,7 +356,8 @@ def get_llm() -> LLM:
         key = env.get(var, "").strip()
         if key:
             pinned = env.get("NAVINIB_MODEL") if p == "openrouter" else env.get("NAVINIB_GROQ_MODEL")
-            models.append(cls(key, pinned or None))
+            paid = env.get("NAVINIB_ALLOW_PAID", "").strip().lower() in ("1", "true", "yes")
+            models.append(cls(key, pinned or None, allow_paid=paid))
     if not models:
         return StubLLM()
     llm = models[0] if len(models) == 1 else ChainLLM(models)

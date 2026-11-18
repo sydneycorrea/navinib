@@ -369,6 +369,37 @@ def test_a_per_minute_rate_limit_waits_and_retries_the_same_model(monkeypatch):
     assert m.complete("summary", "s", "u") == "hi" and waits == [2.0] and m.tried == []
 
 
+def test_a_busy_model_is_passed_over_for_one_call_not_dropped(monkeypatch):
+    """Upstream rate limits and empty answers are temporary: the model is tried again next call."""
+    m = OpenRouterLLM("key", "busy/model:free")
+    monkeypatch.setattr(llm_mod, "free_models", lambda key="": ["backup/model:free"])
+    state = {"busy": True}
+
+    def fake(model, system, user):
+        if model == "busy/model:free" and state["busy"]:
+            raise llm_mod._Skip("busy/model:free returned no text")
+        return model
+    monkeypatch.setattr(m, "_call", fake)
+    assert m.complete("summary", "s", "u") == "backup/model:free"
+    state["busy"] = False
+    assert "busy/model:free" not in m.dead
+    assert m.complete("summary", "s", "u") == "backup/model:free"      # the one that answered goes first
+    m.queue.remove("backup/model:free")
+    assert m.complete("summary", "s", "u") == "busy/model:free"
+
+
+def test_a_paid_model_needs_an_explicit_opt_in(monkeypatch):
+    with pytest.raises(ValueError, match="NAVINIB_ALLOW_PAID"):
+        OpenRouterLLM("key", "meta-llama/llama-3.3-70b-instruct")
+    assert OpenRouterLLM("key", "meta-llama/llama-3.3-70b-instruct", allow_paid=True).model == \
+        "meta-llama/llama-3.3-70b-instruct"
+    monkeypatch.setattr(llm_mod, "_dotenv", lambda: {})
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-test")
+    monkeypatch.setenv("NAVINIB_MODEL", "meta-llama/llama-3.3-70b-instruct")
+    monkeypatch.setenv("NAVINIB_ALLOW_PAID", "1")
+    assert get_llm().name == "openrouter:meta-llama/llama-3.3-70b-instruct"
+
+
 def test_answers_are_cached_so_reruns_spend_no_quota(tmp_path):
     class Counting:
         name, n = "fake:model", 0

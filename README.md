@@ -102,6 +102,15 @@ If both keys are set, Groq is tried first and OpenRouter takes over if Groq fail
 
 **Free daily limits.** Without credits, OpenRouter allows about 50 free-model requests a day across all models; adding $10 of credits raises that to 1,000 a day and free models still cost nothing. Groq's free tier allows about 1,000 a day. The demo makes about 14 model calls and the full evaluation about 180, so on a no-credit OpenRouter key use Groq for `python -m eval.run`. When a provider hits its daily limit, Navinib stops calling it and moves to the next provider, or to its coded fallbacks (partial briefs, plain summary). Answers are saved under `.cache/llm/`, so a rerun spends no quota; delete that folder to get fresh answers.
 
+**A paid model, if you prefer.** Free models are often busy or rate-limited upstream. The course allows a paid model, and one evaluation run on Llama 3.3 70B costs about $0.10. To use it, add credits on OpenRouter and set:
+
+```bash
+NAVINIB_MODEL=meta-llama/llama-3.3-70b-instruct
+NAVINIB_ALLOW_PAID=1
+```
+
+Without `NAVINIB_ALLOW_PAID=1`, any model whose id doesn't end in `:free` is refused.
+
 OpenRouter's free models change often. Navinib tries the models listed in `navinib/policy.yaml`, skips any that is retired or refused, then asks OpenRouter which models are free now (`python -m navinib.agents.llm --list` shows them). Pin one with `NAVINIB_MODEL` (OpenRouter) or `NAVINIB_GROQ_MODEL` (Groq). Tests always use the stub.
 
 The first retrieval run downloads the free all-MiniLM-L6-v2 embedding model (about 80 MB).
