@@ -1,7 +1,12 @@
 """Shared settings. Everything Navinib uses is synthetic or public data."""
 from pathlib import Path
 
+import yaml
+
 ROOT = Path(__file__).resolve().parent.parent
+POLICY_PATH = Path(__file__).resolve().parent / "policy.yaml"
+POLICY = yaml.safe_load(POLICY_PATH.read_text(encoding="utf-8"))   # guardrail limits, owned by compliance
+_LIMITS = POLICY["limits"]
 DB_PATH = ROOT / "data" / "navinib.db"
 CHROMA_PATH = ROOT / "chroma_db"
 
@@ -27,7 +32,7 @@ RECENCY_CAP_DAYS = 60                    # 60+ days since a visit scores as full
 
 # Lab alerts show provider-level counts only; small counts are suppressed so a
 # count can never point to an individual patient.
-ALERT_SUPPRESS_BELOW = 5
+ALERT_SUPPRESS_BELOW = _LIMITS["lab_alert_suppress_below"]
 
 # Route planning
 VISIT_MIN = 30          # default length of an in-person call
@@ -41,6 +46,12 @@ BRIEF_GEN_MARGIN_MIN = 5   # head start so the brief is ready when it is due
 # Tree-of-Thought replan (Checkpoint 4.1)
 PHONE_MIN = 15          # length of a phone call
 TOT_BEAM_WIDTH = 3      # partial plans of each shape kept at each level of the tree
-TOT_MAX_STEPS = 3       # most calls (visits + phone) added to one open window
+TOT_MAX_STEPS = _LIMITS["calls_added_per_window"]   # most calls (visits + phone) added to one open window
 TOT_DRIVE_COST = 0.005  # value lost per minute of driving, so shorter routes win ties
-TOT_MAX_PHONE = 1       # phone calls per window; phone is a fallback for providers a visit can't reach
+TOT_MAX_PHONE = _LIMITS["phone_calls_per_window"]  # phone calls per window; phone is a fallback for providers a visit can't reach
+REPLAN_RADIUS_MIN = _LIMITS["replan_radius_min"]   # replan visits only this close to the rep
+
+# Multi-agent limits (Checkpoint 5.1), set in policy.yaml
+MAX_RETRIES = _LIMITS["compliance_retries"]
+MAX_REFILLS = _LIMITS["refill_rounds"]
+GRAPH_STEPS = _LIMITS["graph_steps"]

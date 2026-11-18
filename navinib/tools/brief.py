@@ -60,7 +60,9 @@ def build_brief(con: sqlite3.Connection, col, provider_id: str, day: str, rep_id
         "lab_alerts": alert_display(alerts["open_count"] if alerts else 0),
         "call_notes": [{"ref": n["id"], "date": n["meta"]["date"], "text": n["text"]} for n in notes],
         "publications": publications,
-        "talking_points": [{"ref": t["meta"]["ref"], "text": t["text"]} for t in talking_points],
+        "talking_points": [{"ref": t["meta"]["ref"], "text": t["text"], "version": t["meta"].get("version")}
+                           for t in talking_points],
+        "trials": [{"ref": t["id"], "status": t["meta"]["status"], "text": t["text"]} for t in trials],
         "do_not_raise": do_not_raise,
         "contacts": [c for l in locations for c in location_contacts(con, l["location_id"])],
     }

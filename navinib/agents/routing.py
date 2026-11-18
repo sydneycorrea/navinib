@@ -71,7 +71,7 @@ def _replan(con: sqlite3.Connection, req: dict, pool: dict, drive: DriveTimes, e
     r = tree_of_thought(con, req["rep_id"], req["day"], req["event_id"], req["now_min"], drive,
                         at_location_id=req.get("at_location_id"), exclude=exclude, pool=pool)
     return {"flow": "cancellation", "window": r["window"], "start_location_id": r["start_location_id"],
-            "start_reason": r["start_reason"], "visits": r["chosen"]["steps"], "alternatives": r["alternatives"],
+            "start_reason": r["start_reason"], "visits": r["chosen"]["steps"], "value": r["chosen"]["value"], "alternatives": r["alternatives"],
             "reason": r["reason"], "drive_source": r["drive_source"]}
 
 

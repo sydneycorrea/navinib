@@ -11,3 +11,11 @@ def con(tmp_path):
     c = connect(path)
     yield c
     c.close()
+
+
+@pytest.fixture(autouse=True)
+def offline(monkeypatch, tmp_path):
+    """Tests never call a real model and never write to the real run log."""
+    from navinib import audit
+    monkeypatch.setenv("OPENROUTER_API_KEY", "")
+    monkeypatch.setattr(audit, "RUNS_PATH", tmp_path / "runs.jsonl")

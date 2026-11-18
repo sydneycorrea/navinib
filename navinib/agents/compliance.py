@@ -7,6 +7,7 @@ import json
 import sqlite3
 from datetime import date
 
+from navinib import guardrails
 from navinib.agents.llm import citations
 from navinib.log import get_logger
 from navinib.tools.schedule import to_min
@@ -75,6 +76,13 @@ def _brief_issues(llm, pid: str, b: dict) -> tuple[list, list]:
               for ref in b["do_not_raise"] if ref in b["text"]]
     issues += [{"agent": "brief", "provider_id": pid, "problem": f"cites {ref}, which is not one of its sources"}
                for ref in cited if ref not in b["allowed_refs"] and ref not in b["do_not_raise"]]
+    issues += [{"agent": "brief", "provider_id": pid,
+                "problem": f"built on label version {ver}, current is {guardrails.current_label()}"}
+               for ver in b.get("label_versions", []) if ver != guardrails.current_label()]
+    # Backstop for the claim-by-claim check Brief already ran: nothing unsupported may remain.
+    _, left = guardrails.claim_check(b["text"], b.get("sources", {}))
+    issues += [{"agent": "brief", "provider_id": pid, "problem": f"unsupported claim ({c['why']}): {c['sentence'][:120]}"}
+               for c in left]
     if issues or b["status"] != "ok":
         return issues, []
     try:

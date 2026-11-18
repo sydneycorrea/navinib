@@ -8,7 +8,7 @@ Capstone project for the CMU Agentic AI program. *Navinib is an app, not a medic
 
 ## Status
 
-Phase 1 (data, tools, retrieval, routing, Tree-of-Thought replan) is done. Phase 2 has started: the five agents from Checkpoint 5.1 run as a LangGraph graph, with a stub LLM until a free model is connected.
+Phase 1 (data, tools, retrieval, routing, Tree-of-Thought replan) is done. The five agents from Checkpoint 5.1 run as a LangGraph graph, and the Checkpoint 6.1 guardrails are built. A free OpenRouter model is used when `OPENROUTER_API_KEY` is set; without it, a deterministic stub runs everything offline.
 
 | Piece | Status |
 | --- | --- |
@@ -19,9 +19,8 @@ Phase 1 (data, tools, retrieval, routing, Tree-of-Thought replan) is done. Phase
 | Route optimizer (OR-Tools, time windows) + drive-time cache | Done |
 | Tree-of-Thought replan (Checkpoint 4.1) | Done |
 | Multi-agent graph: Coordinator, Targeting, Routing, Brief, Compliance (LangGraph) | Done, with a stub LLM |
-| Free OpenRouter model for Coordinator, Brief and Compliance | Phase 2, next |
-| Coordinator reads free-text requests (ReAct over the allowed steps) | Phase 2 |
-| Plan validator and guardrails | Phase 3 (Module 6) |
+| Free OpenRouter model for Coordinator, Brief and Compliance | Client done; first live run pending |
+| Guardrails (Checkpoint 6.1): policy file, input checks, claim-by-claim check, escalation, four lanes, JSON run log, kill switches | Done |
 | Streamlit rep app and manager view | Phase 4 |
 | Evaluation vs prompt-only baseline | Phase 5 |
 
@@ -29,7 +28,10 @@ Phase 1 (data, tools, retrieval, routing, Tree-of-Thought replan) is done. Phase
 
 ```
 navinib/
-  config.py            settings, scoring weights, demo date
+  config.py            settings, scoring weights, demo date; reads the limits in policy.yaml
+  policy.yaml          guardrail policy owned by compliance: limits, model settings, kill switches, check patterns
+  guardrails.py        input checks (PII, injection, adverse events, off-label), claim-by-claim check, escalation, lanes
+  audit.py             one JSON line per run in logs/runs.jsonl, with a trace id
   log.py               logging setup (logs/navinib.log, --verbose)
   db.py                SQLite schema (providers, their locations and weekday hours, visits, schedule)
   data/export_csv.py   CSV export for reviewing the data in a spreadsheet
@@ -50,7 +52,7 @@ navinib/
     routing.py         morning plan with OR-Tools, cancellation replan with Tree-of-Thought (no LLM)
     brief.py           the brief for the next due call (just in time); a partial brief from structured data if retrieval fails
     compliance.py      plan validator: rules first, then an LLM claims check
-    llm.py             the model interface and a deterministic stub
+    llm.py             the model interface: free OpenRouter model, deterministic stub, kill switch
     graph.py           LangGraph hub-and-spoke graph; run it from here
   planner/             planning strategies on top of the tools
     tot.py             Tree-of-Thought replan: compares alternative plans for a freed window
@@ -79,8 +81,11 @@ python -m navinib.planner.tot    # the 4.1 Tree-of-Thought replan: compare plans
 python -m navinib.planner.tot 12:00  # same, but the rep hears of the cancellation at noon
 python -m navinib.agents.graph morning             # the five agents plan the demo day
 python -m navinib.agents.graph cancel ev-04 14:00  # the agents handle Dr. Smith's 2pm cancellation
+python -m navinib.agents.graph demo                # the whole day, including the guardrails firing
 pytest                           # runs the tests
 ```
+
+To use a real model, get a free key at [openrouter.ai/keys](https://openrouter.ai/keys) and set `OPENROUTER_API_KEY` as a Codespaces secret, or copy `.env.example` to `.env`. Only free models are allowed (ids ending in `:free`); pick one with `NAVINIB_MODEL` or change the default in `navinib/policy.yaml`. Tests always use the stub.
 
 The first retrieval run downloads the free all-MiniLM-L6-v2 embedding model (about 80 MB).
 
@@ -119,7 +124,22 @@ The multi-agent design from Checkpoint 5.1 runs in `navinib/agents/`. The Coordi
   - No live road times: Routing uses cached or straight-line times, and the plan says they are estimates.
   - Model down: the rep still gets the ranked plan, with a summary built in code instead of written by the model. If the claims check can't run, the rep sees a warning.
 - **Shared state:** one typed state (`agents/state.py`); each agent may write only its own part, and the graph refuses anything else.
-- **LLM:** a deterministic stub stands in for the model, so the graph and tests run offline. Only the Coordinator (plan summary), Brief (writing) and Compliance (claims check) use it.
+- **LLM:** a free OpenRouter model (temperature 0.2, token cap from the policy) when a key is set, otherwise a deterministic stub, so the graph and tests run offline. Only the Coordinator (plan summary), Brief (writing), Compliance (claims check) and the adverse-event classifier use it.
+
+## Guardrails
+
+The safety plan from Checkpoint 6.1. Hard limits live in `navinib/policy.yaml` and in code, not in prompts: a model can be talked out of a prompt rule but cannot use a tool it was never given.
+
+| Stage | What runs | Where |
+| --- | --- | --- |
+| Configuration | No outbound tools (nothing emails, texts or calls an office or writes to a CRM); the only write is `approve_plan` after the rep approves. Each agent writes only its own state. Retry, refill, phone-call, radius and lab-alert limits; free models only, temperature 0.2, token and step caps | `policy.yaml`, `agents/specs.py`, `agents/graph.py` |
+| Rep message | Unknown request: a clarifying question. Possible adverse event: stop, log for safety reporting. Off-label question: stop, refer to Medical Information | `agents/coordinator.py` |
+| Call notes and retrieved text | Personal data redacted; instruction-like text quarantined for admin review; a possible adverse event escalated once and left out of the brief; label passages from a superseded version dropped | `agents/brief.py`, `guardrails.py` |
+| Brief output | Claim by claim: a dose, indication or efficacy sentence must cite the label or an approved trial, and its numbers must appear in that source; otherwise it is removed and marked. Then Compliance re-checks citations, do-not-raise items, label version and claims, and runs the LLM claims check | `guardrails.claim_check`, `agents/compliance.py` |
+| Human review | Every output gets a lane: **Auto, logged** (ranking, route drafts, a clean brief), **Rep approves** (every calendar change), **Flag to rep** (failures after retries, partial briefs, estimated drive times, close replan options), **Stop and escalate** (adverse events, off-label questions, quarantined documents) | `state["lanes"]` |
+| Monitoring | One JSON line per run in `logs/runs.jsonl`: trace id, model, policy and label versions, prompt hashes, checks, lanes, escalations, trace. Kill switches: `agents.brief: false` gives plan-only mode; `agents.llm: false` makes every agent use its coded fallback | `audit.py`, `policy.yaml` |
+
+The demo data includes two notes that trip these checks: Dr. Lee's office reports a patient hospitalized with a rash (an adverse event that also names the patient), and a memo in Dr. Okafor's notes tries to steer the model toward first-line use (injection). `python -m navinib.agents.graph demo` shows both being handled.
 
 ## License
 

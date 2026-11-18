@@ -41,7 +41,7 @@ from navinib.tools.schedule import hhmm, schedule_lookup
 
 log = get_logger("navinib.planner.tot")
 
-VISIT_RADIUS_MIN = 20   # in-person candidates must be this close to where the rep is
+VISIT_RADIUS_MIN = config.REPLAN_RADIUS_MIN   # in-person candidates must be this close to where the rep is
 N_VISIT_CANDIDATES = 6
 N_PHONE_CANDIDATES = 4
 

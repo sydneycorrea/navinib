@@ -19,7 +19,7 @@ from chromadb.utils import embedding_functions
 
 from navinib.config import CHROMA_PATH
 from navinib.log import get_logger
-from navinib.rag.corpus import CALL_NOTES, LABEL, PUBLICATIONS, TRIALS
+from navinib.rag.corpus import CALL_NOTES, LABEL, LABEL_VERSION, PUBLICATIONS, TRIALS
 
 log = get_logger("navinib.rag.retrieval")
 
@@ -54,7 +54,8 @@ def build_index(path=CHROMA_PATH):
         for i, piece in enumerate(chunk(text)):
             ids.append(f"label-{section.split()[0]}-{i}")
             docs.append(f"{section}. {piece}")
-            metas.append({"source": "label", "status": "approved", "ref": f"Label §{section.split()[0]}"})
+            metas.append({"source": "label", "status": "approved", "ref": f"Label §{section.split()[0]}",
+                          "version": LABEL_VERSION})
     for nct, status, text in TRIALS:
         ids.append(nct)
         docs.append(text)
