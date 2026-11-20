@@ -53,7 +53,9 @@ if left:
         save(r["id"], "skip")
         st.rerun()
     st.caption("Advice to the rep (\"be prepared to...\", \"refer them to Medical Information\") counts as "
-               "supported. A product claim with no citation counts as not supported.")
+               "supported. A product claim with no citation counts as not supported. A sentence that drops a "
+               "limitation changing who the product is for (for example, leaves out \"after platinum-based "
+               "chemotherapy\" from the indication) counts as not supported.")
 else:
     st.success("All done. Thank you!")
     s = score()
