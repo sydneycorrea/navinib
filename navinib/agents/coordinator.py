@@ -288,7 +288,9 @@ def _finish_plan(state: dict, llm, flags: list) -> dict:
         message = llm.complete("summary", SUMMARY_SYSTEM, str(data), data=data)
     except Exception as e:  # model down: the rep still gets the plan, without the written summary
         log.warning("summary unavailable: %s", e)
-        message = "Written summary unavailable (model down). " + plain_summary(data)
+        why = "the model is switched off" if "kill switch" in str(e) else (
+            "the daily free-model limit is reached" if "daily" in str(e) else "the model did not answer")
+        message = f"Written summary unavailable ({why}; plan built in code). " + plain_summary(data)
     items = [("ranking and route drafts", "auto", "internal work, kept in the trace"),
              ("plan", "rep_approves", "every calendar change waits for the rep (autonomy level 2)")]
     items += [(f"plan: {f['provider_id']}", "flag", f"{f['problem']} (still failing after {MAX_RETRIES} retries)")

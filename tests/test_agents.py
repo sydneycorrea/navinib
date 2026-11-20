@@ -191,7 +191,7 @@ def test_model_down_still_gives_the_rep_the_plan_and_a_partial_brief(con, col, d
     """Model down: the plan summary is built in code, and the due call gets a partial brief."""
     final = run(con, CANCEL, col=col, llm=DownLLM(), drive=drive)
     assert final["plan"]["visits"] and final["status"] == "awaiting_approval"
-    assert final["message"].startswith("Written summary unavailable (model down). Proposed:")
+    assert final["message"].startswith("Written summary unavailable (the model did not answer; plan built in code). Proposed:")
     approve_plan(con, final)
     b = brief_next_call(con, "rep-01", config.DEMO_DATE, to_min("14:00"), col=col, llm=DownLLM())
     assert all(x["status"] == "partial" and "model unavailable" in x["why"] for x in b["briefs"].values())

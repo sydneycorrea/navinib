@@ -90,8 +90,27 @@ def lane_chips(lanes: list) -> str:
     return "".join(out)
 
 
+MODE = {"face_to_face": ("🚶", "Face to face"), "phone": ("📞", "Phone call")}
+
+
+def office(location_id: str | None) -> dict:
+    """The office a call is at: practice name and address (empty for tasks with no place)."""
+    row = con.execute("SELECT affiliation, address FROM location WHERE location_id = ?",
+                      (location_id,)).fetchone() if location_id else None
+    return {"name": row["affiliation"], "address": row["address"]} if row else {"name": "", "address": ""}
+
+
+def call_summary(start: str, end: str, call_type: str, location_id: str | None, status: str = "") -> dict:
+    """The quick summary of one call: when, how (face to face or phone) and where."""
+    icon, mode = MODE.get(call_type, MODE["face_to_face"])
+    where = office(location_id)
+    return {"when": f"{start}–{end}", "icon": icon, "mode": mode, "office": where["name"],
+            "address": where["address"], "status": status}
+
+
 def calendar(events: list, proposed: list, briefed: set, now_min: int) -> str:
-    """A one-day calendar: booked calls, fixed tasks, cancelled calls, proposed calls and the current time."""
+    """A one-day calendar: booked calls, fixed tasks, cancelled calls, proposed calls and the current time.
+    Each call shows how it happens and where; hovering over it shows the full summary."""
     height = (DAY_END - DAY_START) * PX_PER_HOUR // 60
     y = lambda m: (m - DAY_START) * PX_PER_HOUR / 60   # noqa: E731
     rows = []
@@ -101,11 +120,16 @@ def calendar(events: list, proposed: list, briefed: set, now_min: int) -> str:
                     f"<div style='position:absolute;top:{top - 8}px;left:0;width:44px;font-size:11px;"
                     f"color:#6b7280'>{h:02d}:00</div>")
 
-    def block(start, end, title, sub, bg, border, extra=""):
+    def block(start, end, title, sub, bg, border, extra="", tip=""):
         top, h = y(start), max(y(end) - y(start), 18)
-        return (f"<div style='position:absolute;top:{top}px;height:{h - 2}px;left:52px;right:4px;background:{bg};"
+        return (f"<div title='{html.escape(tip or title, quote=True)}' style='position:absolute;top:{top}px;"
+                f"height:{h - 2}px;left:52px;right:4px;background:{bg};cursor:default;"
                 f"border-left:4px solid {border};border-radius:6px;padding:2px 8px;font-size:12px;overflow:hidden;"
+                f"white-space:nowrap;text-overflow:ellipsis;"
                 f"{extra}'><b>{html.escape(title)}</b> <span style='color:#4b5563'>{html.escape(sub)}</span></div>")
+
+    def tip(title, c):
+        return "\n".join(x for x in (title, c["when"], f"{c['mode']}", c["office"], c["address"], c["status"]) if x)
 
     for e in events:
         sub = f"{e['start']}–{e['end']}"
@@ -113,15 +137,20 @@ def calendar(events: list, proposed: list, briefed: set, now_min: int) -> str:
             rows.append(block(e["start_min"], e["end_min"], e["title"], sub + " · cancelled", "#f3f4f6", "#9ca3af",
                               "text-decoration:line-through;color:#9ca3af"))
         elif e["kind"] == "call":
+            c = call_summary(e["start"], e["end"], e["call_type"], e["location_id"],
+                             "Brief ready" if e["event_id"] in briefed else "")
             tag = " · brief ready" if e["event_id"] in briefed else ""
-            rows.append(block(e["start_min"], e["end_min"], e["title"], sub + tag, "#e8f1fb", "#1f5fa8"))
+            rows.append(block(e["start_min"], e["end_min"], e["title"], f"{sub} · {c['icon']} {c['office']}{tag}",
+                              "#e8f1fb", "#1f5fa8", tip=tip(e["title"], c)))
         else:
             rows.append(block(e["start_min"], e["end_min"], e["title"], sub, "#f5f3ff", "#7c3aed"))
     for v in proposed:
         s, en = to_min(v["start"]), to_min(v["end"])
-        kind = "Visit" if v["call_type"] == "face_to_face" else "Phone"
-        rows.append(block(s, en, f"Proposed {kind.lower()}: {v['full_name']}", f"{v['start']}–{v['end']}",
-                          "#e7f6ec", "#1e7a3c", "border:1px dashed #1e7a3c;border-left:4px solid #1e7a3c"))
+        c = call_summary(v["start"], v["end"], v["call_type"], v.get("location_id"), "Proposed, waiting for you")
+        title = f"Proposed: {v['full_name']}"
+        rows.append(block(s, en, title, f"{c['when']} · {c['icon']} {c['office']}",
+                          "#e7f6ec", "#1e7a3c", "border:1px dashed #1e7a3c;border-left:4px solid #1e7a3c",
+                          tip=tip(title, c)))
     if DAY_START <= now_min <= DAY_END:
         rows.append(f"<div style='position:absolute;top:{y(now_min)}px;left:44px;right:0;border-top:2px solid "
                     f"#dc2626'></div><div style='position:absolute;top:{y(now_min) - 7}px;left:0;width:44px;font-size:11px;"
@@ -193,20 +222,36 @@ if view == "Rep: my day":
     with left:
         st.markdown("**Today**")
         st.markdown(calendar(schedule["events"], proposed, briefed, now_min), unsafe_allow_html=True)
+        st.caption("Hover over a call for its summary, or open it below.")
+        st.markdown("**Calls today**")
+        items = [(e["start_min"], e["title"], e["start"], e["end"], e["call_type"], e["location_id"],
+                  "Brief ready" if e["event_id"] in briefed else "Booked")
+                 for e in schedule["events"] if e["kind"] == "call" and e["status"] != "cancelled"]
+        items += [(to_min(v["start"]), f"Proposed: {v['full_name']}", v["start"], v["end"], v["call_type"],
+                   v.get("location_id"), "Proposed, waiting for your approval") for v in proposed]
+        for _, title, s0, e0, ctype, loc_id, status in sorted(items):
+            c = call_summary(s0, e0, ctype, loc_id, status)
+            with st.expander(f"{c['when']} · {c['icon']} {title}"):
+                st.markdown(f"**How:** {c['mode']}  \n**Where:** {c['office'] or 'n/a'}"
+                            + (f", {c['address']}" if c["address"] else "")
+                            + (" (the rep calls from wherever they are)" if ctype == "phone" else "")
+                            + f"  \n**Status:** {c['status']}")
+
+    with right:
         points = []
         for e in schedule["events"]:
-            if e["location_id"] and e["status"] != "cancelled":
+            if e["location_id"] and e["status"] != "cancelled" and e["call_type"] != "phone":
                 loc = con.execute("SELECT lat, lon FROM location WHERE location_id = ?", (e["location_id"],)).fetchone()
                 points.append({"lat": loc["lat"], "lon": loc["lon"], "color": "#1f5fa8"})
         for v in proposed:
+            if v["call_type"] == "phone":
+                continue
             loc = con.execute("SELECT lat, lon FROM location WHERE location_id = ?", (v["location_id"],)).fetchone()
             if loc:
                 points.append({"lat": loc["lat"], "lon": loc["lon"], "color": "#1e7a3c"})
         if points:
-            st.markdown("**Where** (blue booked, green proposed)")
-            st.map(pd.DataFrame(points), color="color", size=60, height=260)
-
-    with right:
+            st.markdown("**Where** (blue booked, green proposed visits)")
+            st.map(pd.DataFrame(points), color="color", size=60, height=240)
         st.markdown("**What do you need?**")
         a, b, c = st.columns(3)
         if a.button("Plan my day", use_container_width=True):
