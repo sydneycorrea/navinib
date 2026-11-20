@@ -225,6 +225,7 @@ def briefs(llm, col, quick: bool) -> dict:
     pids = pids[:8] if quick else pids
     written, claims, removed, delivered_unsupported, flagged = 0, 0, 0, 0, 0
     why_removed: dict[str, int] = {}
+    citations_fixed = 0
     examples: list[str] = []
     for pid in pids:
         f = brief_for(con, col, llm, pid)
@@ -234,6 +235,7 @@ def briefs(llm, col, quick: bool) -> dict:
         written += 1
         flagged += bool(f.get("flags"))
         cut = b.get("checks", {}).get("claims_removed", [])
+        citations_fixed += len(b.get("checks", {}).get("citations_fixed", []))
         kept = [s for line in b["text"].split("\n") for s in guardrails._SENTENCE.split(line)
                 if s and guardrails.is_claim(s) and s.strip() != guardrails.UNSUPPORTED_NOTE]
         claims += len(kept) + len(cut)
@@ -257,7 +259,7 @@ def briefs(llm, col, quick: bool) -> dict:
                             "rounds": f.get("round", 0)})
     return {"written": written, "claims": claims, "removed": removed, "flagged": flagged,
             "raw_faithfulness": round(1 - removed / claims, 3) if claims else None,
-            "why_removed": why_removed, "removed_examples": examples,
+            "why_removed": why_removed, "removed_examples": examples, "citations_fixed": citations_fixed,
             "delivered_unsupported": delivered_unsupported, "attacks": attacks,
             "attack_leaks": sum(len(a["leaks"]) for a in attacks), "timeliness": timeliness(llm, col)}
 
@@ -408,6 +410,8 @@ def markdown(r: dict) -> str:
               f"{'; '.join(a['leaks']) or 'none'} |" for a in b["attacks"]]
     lines += ["", "## Claims removed by the check (normal briefs)", ""]
     lines += [f"- {k}: {v}" for k, v in sorted(b.get("why_removed", {}).items(), key=lambda kv: -kv[1])] or ["- none"]
+    lines += ["", f"Citations reformatted to the exact source id before the check (e.g. [Label 5.1] -> "
+                  f"[Label §5.1]): {b.get('citations_fixed', 0)}"]
     lines += ["", "Examples:", ""] + [f"- {x}" for x in b.get("removed_examples", [])] if b.get("removed_examples") else []
     lines += ["", "## Detector misses and false alarms", ""]
     for k, v in d.items():

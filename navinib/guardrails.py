@@ -112,6 +112,29 @@ def is_claim(sentence: str) -> bool:
     return any(p.search(bare) for p in CLAIM_PATTERNS)
 
 
+def _ref_key(ref: str) -> str:
+    return re.sub(r"[\s§\-_.:]|section|sec", "", ref.lower())
+
+
+def normalize_citations(text: str, sources: dict[str, str]) -> tuple[str, list[str]]:
+    """Rewrite a citation to its source's exact id when only the format differs
+    ("[Label 5.1]" or "[label §5.1]" -> "[Label §5.1]", "[N0420]" -> "[N-0420]").
+    Content is never changed; returns the text and the citations it rewrote."""
+    keys = {_ref_key(k): k for k in sources}
+    fixed = []
+
+    def fix(m: re.Match) -> str:
+        parts = [p.strip() for p in m.group(1).split(",")]
+        out = []
+        for p in parts:
+            exact = p if p in sources else keys.get(_ref_key(p))
+            if exact and exact != p:
+                fixed.append(f"{p} -> {exact}")
+            out.append(exact or p)
+        return "[" + ", ".join(out) + "]"
+    return _CITE.sub(fix, text), fixed
+
+
 def claim_check(text: str, sources: dict[str, str]) -> tuple[str, list[dict]]:
     """Check every claim sentence against the sources it cites; remove the ones that don't hold.
 
@@ -122,6 +145,7 @@ def claim_check(text: str, sources: dict[str, str]) -> tuple[str, list[dict]]:
     citation before it on the same line ("Talking point [Label §5.1]: ... . ..."). Anything
     removed is replaced by a visible note, never silently.
     """
+    text = normalize_citations(text, sources)[0]
     kept, removed = [], []
     for line in text.split("\n"):
         out, carried = [], []

@@ -45,7 +45,9 @@ def make(size: int = SIZE) -> list[dict]:
             continue
         b = f["briefs"][pid]
         sources = b.get("sources", {})
-        show = lambda refs: {r: sources.get(r, "(source not given to the brief)")[:700] for r in refs}  # noqa: E731
+        def show(refs):
+            refs = [guardrails.normalize_citations(f"[{r}]", sources)[0][1:-1] for r in refs]
+            return {r: sources.get(r, "(source not given to the brief)")[:700] for r in refs}
         for line in b["text"].split("\n"):
             carried: list[str] = []
             for s in [x for x in guardrails._SENTENCE.split(line) if x and x.strip()]:
@@ -67,6 +69,8 @@ def make(size: int = SIZE) -> list[dict]:
     for i, r in enumerate(pick, 1):
         r["id"] = f"c{i:02d}"
     LABELS.mkdir(exist_ok=True)
+    if ANSWERS.exists():   # answers belong to the old sheet's sentences: keep them aside, start fresh
+        ANSWERS.replace(LABELS / "answers.old.json")
     SHEET.write_text(json.dumps({"model": model, "rows": pick}, indent=1), encoding="utf-8")
     print(f"{len(pick)} sentences ({len(removed)} removed and {len(kept)} kept in all) from {model} -> {SHEET}")
     print("Next: python -m streamlit run eval/label_app.py")

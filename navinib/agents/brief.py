@@ -31,7 +31,7 @@ log = get_logger("navinib.agents.brief")
 _RETRIEVAL = threading.Lock()
 
 SYSTEM = """You write a pre-call brief for a pharmaceutical field rep, at most 150 words.
-Use only the facts in the input. Put the source id in square brackets after each fact, e.g. [N-0388].
+Use only the facts in the input. Put the source id in square brackets after each fact, copied exactly, e.g. [N-0388] or [Label §5.1].
 Talking points may come only from the approved label (refs starting 'Label') or approved trials.
 Never mention anything listed in do_not_raise; if the provider may ask about it, say to refer
 them to Medical Information. The only drug name you may use is Product X.
@@ -80,6 +80,7 @@ def brief(payload: dict, config: dict) -> dict:
                                    data={"visit": v, "inputs": inputs, "feedback": payload.get("feedback")})
     except Exception as e:  # model down: same structured fallback
         return _partial(cfg["con"], payload, f"model unavailable: {e}", checks)
+    text, checks["citations_fixed"] = guardrails.normalize_citations(text, sources)
     text, removed = guardrails.claim_check(text, sources)
     checks["claims_removed"] = removed
     log.info("brief %s round %d: %d words, cites %s, %d claim(s) removed", pid, payload["round"],

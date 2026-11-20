@@ -429,3 +429,11 @@ def test_empty_environment_variable_does_not_hide_dotenv(monkeypatch):
     monkeypatch.setenv("OPENROUTER_API_KEY", "sk-shell")
     s = llm_mod.settings()
     assert s["NAVINIB_MODEL"] == "meta-llama/llama-3.3-70b-instruct" and s["OPENROUTER_API_KEY"] == "sk-shell"
+
+
+def test_citation_format_is_normalized_before_the_check():
+    """[Label 5.1] is the same source as [Label §5.1]: the claim stays, its numbers still checked."""
+    text, removed = guardrails.claim_check("Neutropenia occurred in 31% of patients [Label 5.1].", SOURCES)
+    assert not removed and "[Label §5.1]" in text
+    _, removed = guardrails.claim_check("Neutropenia occurred in 8% of patients [Label 5.1].", SOURCES)
+    assert removed and removed[0]["why"].startswith("numbers not in the cited source")
