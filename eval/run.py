@@ -393,7 +393,7 @@ def markdown(r: dict) -> str:
         f"| Briefs on time (demo day with replan) | 95% | {t['on_time']} of {t['calls']} calls; cancelled call "
         f"briefed: {'yes' if t['cancelled_briefed'] else 'no'} |",
         f"| Failures ending in a labeled fallback | 100% | {sum(f['ok'] for f in fb)} of {len(fb)} |",
-        "| Judge agreement (kappa, 30 hand-labeled briefs) | 0.6 or higher | needs hand labels on real-model briefs |",
+        judge_row(),
         "", "## Replan quality (Tree-of-Thought value score)", "",
         "| Scenario | Window | Greedy | Beam (ours) | Full search |", "| --- | --- | --- | --- | --- |",
     ]
@@ -419,6 +419,16 @@ def markdown(r: dict) -> str:
     lines += [f"| {x['event']} | {x['start']} | {x['booked']} | {x['due']} | {x['written'] or 'not written'} |"
               for x in t["rows"]]
     return "\n".join(lines) + "\n"
+
+
+def judge_row() -> str:
+    """Agreement between the claim check and a person's labels (python -m eval.label_sheet)."""
+    from eval.label_sheet import score
+    s = score()
+    if not s or not s["labeled"]:
+        return "| Judge agreement (kappa, hand-labeled claim sentences) | 0.6 or higher | needs hand labels |"
+    return (f"| Judge agreement (kappa, {s['labeled']} hand-labeled claim sentences) | 0.6 or higher | "
+            f"{s['kappa']} (agreement {pct(s['agreement'])}) |")
 
 
 def main(quick: bool = False) -> dict:
