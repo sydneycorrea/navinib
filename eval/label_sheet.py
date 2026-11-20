@@ -69,8 +69,18 @@ def make(size: int = SIZE) -> list[dict]:
     for i, r in enumerate(pick, 1):
         r["id"] = f"c{i:02d}"
     LABELS.mkdir(exist_ok=True)
-    if ANSWERS.exists():   # answers belong to the old sheet's sentences: keep them aside, start fresh
+    if ANSWERS.exists() and SHEET.exists():
+        # Keep an answer when the same sentence is in the new sheet (and it showed its source text);
+        # the old file is kept aside as answers.old.json.
+        old_rows = {r["id"]: r for r in json.loads(SHEET.read_text(encoding="utf-8"))["rows"]}
+        old = json.loads(ANSWERS.read_text(encoding="utf-8"))
         ANSWERS.replace(LABELS / "answers.old.json")
+        by_text = {old_rows[i]["sentence"]: a for i, a in old.items() if i in old_rows and a != "skip"
+                   and "(source not given to the brief)" not in old_rows[i]["sources"].values()}
+        kept = {r["id"]: by_text[r["sentence"]] for r in pick if r["sentence"] in by_text}
+        if kept:
+            ANSWERS.write_text(json.dumps(kept, indent=1), encoding="utf-8")
+        print(f"Kept {len(kept)} of your {len(old)} earlier answers (same sentence, source shown).")
     SHEET.write_text(json.dumps({"model": model, "rows": pick}, indent=1), encoding="utf-8")
     print(f"{len(pick)} sentences ({len(removed)} removed and {len(kept)} kept in all) from {model} -> {SHEET}")
     print("Next: python -m streamlit run eval/label_app.py")
