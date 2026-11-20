@@ -224,6 +224,9 @@ def briefs(llm, col, quick: bool) -> dict:
     pids = [r[0] for r in con.execute("SELECT provider_id FROM provider ORDER BY provider_id")]
     pids = pids[:8] if quick else pids
     written, claims, removed, delivered_unsupported, flagged = 0, 0, 0, 0, 0
+    why_removed: dict[str, int] = {}
+    citations_fixed = 0
+    examples: list[str] = []
     for pid in pids:
         f = brief_for(con, col, llm, pid)
         if not f or not f.get("briefs"):
@@ -232,10 +235,16 @@ def briefs(llm, col, quick: bool) -> dict:
         written += 1
         flagged += bool(f.get("flags"))
         cut = b.get("checks", {}).get("claims_removed", [])
+        citations_fixed += len(b.get("checks", {}).get("citations_fixed", []))
         kept = [s for line in b["text"].split("\n") for s in guardrails._SENTENCE.split(line)
                 if s and guardrails.is_claim(s) and s.strip() != guardrails.UNSUPPORTED_NOTE]
         claims += len(kept) + len(cut)
         removed += len(cut)
+        for c in cut:   # why each sentence was removed, so a drop in faithfulness can be explained
+            reason = c["why"].split(":")[0]
+            why_removed[reason] = why_removed.get(reason, 0) + 1
+            if len(examples) < 8:
+                examples.append(f"{pid}: ({c['why']}) {c['sentence'][:160]}")
         delivered_unsupported += len(guardrails.claim_check(b["text"], b.get("sources", {}))[1])
     attacks = []
     for attacker in (LeakyLLM(), NumbersLLM(), MixupLLM(), UnsourcedLLM()):
@@ -250,6 +259,7 @@ def briefs(llm, col, quick: bool) -> dict:
                             "rounds": f.get("round", 0)})
     return {"written": written, "claims": claims, "removed": removed, "flagged": flagged,
             "raw_faithfulness": round(1 - removed / claims, 3) if claims else None,
+            "why_removed": why_removed, "removed_examples": examples, "citations_fixed": citations_fixed,
             "delivered_unsupported": delivered_unsupported, "attacks": attacks,
             "attack_leaks": sum(len(a["leaks"]) for a in attacks), "timeliness": timeliness(llm, col)}
 
@@ -385,7 +395,7 @@ def markdown(r: dict) -> str:
         f"| Briefs on time (demo day with replan) | 95% | {t['on_time']} of {t['calls']} calls; cancelled call "
         f"briefed: {'yes' if t['cancelled_briefed'] else 'no'} |",
         f"| Failures ending in a labeled fallback | 100% | {sum(f['ok'] for f in fb)} of {len(fb)} |",
-        "| Judge agreement (kappa, 30 hand-labeled briefs) | 0.6 or higher | needs hand labels on real-model briefs |",
+        judge_row(),
         "", "## Replan quality (Tree-of-Thought value score)", "",
         "| Scenario | Window | Greedy | Beam (ours) | Full search |", "| --- | --- | --- | --- | --- |",
     ]
@@ -398,6 +408,11 @@ def markdown(r: dict) -> str:
               "| --- | --- | --- | --- | --- |"]
     lines += [f"| {a['attack']} | {a['provider']} | {a['outcome']} | {a['rounds']} | "
               f"{'; '.join(a['leaks']) or 'none'} |" for a in b["attacks"]]
+    lines += ["", "## Claims removed by the check (normal briefs)", ""]
+    lines += [f"- {k}: {v}" for k, v in sorted(b.get("why_removed", {}).items(), key=lambda kv: -kv[1])] or ["- none"]
+    lines += ["", f"Citations reformatted to the exact source id before the check (e.g. [Label 5.1] -> "
+                  f"[Label §5.1]): {b.get('citations_fixed', 0)}"]
+    lines += ["", "Examples:", ""] + [f"- {x}" for x in b.get("removed_examples", [])] if b.get("removed_examples") else []
     lines += ["", "## Detector misses and false alarms", ""]
     for k, v in d.items():
         lines.append(f"- **{k}**: missed {v['missed'] or 'none'}; false alarms {v['false_alarms'] or 'none'}")
@@ -408,6 +423,18 @@ def markdown(r: dict) -> str:
     lines += [f"| {x['event']} | {x['start']} | {x['booked']} | {x['due']} | {x['written'] or 'not written'} |"
               for x in t["rows"]]
     return "\n".join(lines) + "\n"
+
+
+def judge_row() -> str:
+    """Agreement between the claim check and a person's labels (python -m eval.label_sheet)."""
+    from eval.label_sheet import score
+    s = score()
+    if not s or not s["labeled"]:
+        return "| Judge agreement (kappa, hand-labeled claim sentences) | 0.6 or higher | needs hand labels |"
+    k = "undefined (one class only)" if s["kappa"] is None else s["kappa"]
+    return (f"| Judge agreement (kappa, {s['labeled']} hand-labeled claim sentences) | 0.6 or higher | "
+            f"{k} (agreement {pct(s['agreement'])}; unsupported: {s['human_unsupported']} by hand, "
+            f"{s['check_unsupported']} by the check) |")
 
 
 def main(quick: bool = False) -> dict:

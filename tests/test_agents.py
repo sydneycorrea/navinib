@@ -191,7 +191,7 @@ def test_model_down_still_gives_the_rep_the_plan_and_a_partial_brief(con, col, d
     """Model down: the plan summary is built in code, and the due call gets a partial brief."""
     final = run(con, CANCEL, col=col, llm=DownLLM(), drive=drive)
     assert final["plan"]["visits"] and final["status"] == "awaiting_approval"
-    assert final["message"].startswith("Written summary unavailable (model down). Proposed:")
+    assert final["message"].startswith("Written summary unavailable (the model did not answer; plan built in code). Proposed:")
     approve_plan(con, final)
     b = brief_next_call(con, "rep-01", config.DEMO_DATE, to_min("14:00"), col=col, llm=DownLLM())
     assert all(x["status"] == "partial" and "model unavailable" in x["why"] for x in b["briefs"].values())
@@ -265,3 +265,21 @@ def test_underfilled_day_asks_targeting_once_for_the_next_candidates(con, col, d
     assert HILLCREST not in {t["provider_id"] for t in final["targets"]["ranked"]}
     after_smith = [v for v in final["plan"]["visits"] if v["start"] >= "14:00"]
     assert after_smith and final["status"] == "awaiting_approval"
+
+
+def test_claim_lines_one_issue_per_line_without_fragments():
+    from navinib.agents.compliance import claim_lines
+    answer = "- The clinic name is not in N-0420.\nHe has no\n- " + "x " * 120
+    lines = claim_lines(answer)
+    assert lines[0] == "The clinic name is not in N-0420."
+    assert len(lines) == 2 and len(lines[1]) <= 161 and lines[1].endswith("…")
+    assert claim_lines("The dose is not in the label.\nHe has no") == ["The dose is not in the label."]
+    assert claim_lines("PASS") == ["the claims check did not say which statement"]
+
+
+def test_brief_gets_a_schedule_source(con):
+    from navinib.agents.brief import schedule_source
+    loc = con.execute("SELECT location_id, affiliation FROM location LIMIT 1").fetchone()
+    v = {"call_type": "face_to_face", "start": "08:45", "end": "09:30", "location_id": loc["location_id"]}
+    text = schedule_source(con, v, {"full_name": "Dr. A", "tier": "B"})
+    assert text.startswith("Dr. A, tier B: face-to-face call 08:45-09:30 at " + loc["affiliation"])

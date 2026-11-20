@@ -21,8 +21,8 @@ Phase 1 (data, tools, retrieval, routing, Tree-of-Thought replan) is done. The f
 | Multi-agent graph: Coordinator, Targeting, Routing, Brief, Compliance (LangGraph) | Done |
 | Free model (OpenRouter, Groq) for Coordinator, Brief and Compliance | Done; live check passed 2026-11-18 |
 | Guardrails (Checkpoint 6.1): policy file, input checks, claim-by-claim check, escalation, four lanes, JSON run log, kill switches | Done |
-| Streamlit rep app and manager view | Phase 4 |
-| Evaluation runner (`python -m eval.run`) | Done; live results below |
+| Streamlit app: calendar day, chat, approval card, lanes, map, regional manager view | Done |
+| Evaluation runner (`python -m eval.run`) and hand-label agreement (`python -m eval.label_sheet`) | Done; live results below |
 
 ## Layout
 
@@ -59,6 +59,7 @@ navinib/
   rag/                 retrieval for pre-call briefs
     corpus.py          fictional Product X label, trials, call notes, provider publications
     retrieval.py       label lookup, trial search, call-note recall, publication search
+app/main.py            Streamlit app: the rep's day and the regional manager view
 tests/                 pytest suite
 ```
 
@@ -82,6 +83,7 @@ python -m navinib.planner.tot 12:00  # same, but the rep hears of the cancellati
 python -m navinib.agents.graph morning             # the five agents plan the demo day
 python -m navinib.agents.graph cancel ev-04 14:00  # the agents handle Dr. Smith's 2pm cancellation
 python -m navinib.agents.graph demo                # the whole day, including the guardrails firing
+python -m streamlit run app/main.py  # the app (rep view and regional manager view)
 pytest                           # runs the tests
 ```
 
@@ -114,6 +116,13 @@ Without `NAVINIB_ALLOW_PAID=1`, any model whose id doesn't end in `:free` is ref
 OpenRouter's free models change often. Navinib tries the models listed in `navinib/policy.yaml`, skips any that is retired or refused, then asks OpenRouter which models are free now (`python -m navinib.agents.llm --list` shows them). Pin one with `NAVINIB_MODEL` (OpenRouter) or `NAVINIB_GROQ_MODEL` (Groq). Tests always use the stub.
 
 The first retrieval run downloads the free all-MiniLM-L6-v2 embedding model (about 80 MB).
+
+## App
+
+`python -m streamlit run app/main.py` opens Navinib in the browser (in Codespaces, open the forwarded port 8501). Each browser session works on its own copy of the demo day; **Reset the demo day** starts over.
+
+- **Rep: my day.** A calendar of the day (booked calls, fixed tasks, cancelled calls struck through, proposed calls dashed in green, a red line at the simulated time). Pick the time in the sidebar, then **Plan my day**, **A call cancelled** (pick the call, then replan), or **Brief my next call**. A proposed plan shows why it won, its alternatives, and **Approve and book** / **Reject**. Every answer lists who acts on each output (the four lanes) and has the agent trace. **Talk to Navinib** is a conversation with history: the buttons appear in it as the rep's turns, and the rep can also type, for example "plan my day", "move my 2pm", "book it", "what should I avoid with Dr. Okafor?" or "tell me about Dr. Lee" (`navinib/agents/chat.py`). Rules, not the model, decide which action a message asks for, and plans still wait for approval. Every message is screened first: a doctor's question about first-line use goes to Medical Information, and a side effect a patient had goes to safety reporting. The map numbers each in-person stop in visit order; hover over a dot for who, when and where.
+- **Regional manager.** Read-only and team level: tier-A goal coverage, overdue providers, the sample of briefs written, escalations, the rep's approve/reject log and the runs logged in the session.
 
 ## Logs
 
@@ -169,22 +178,22 @@ The demo data includes two notes that trip these checks: Dr. Lee's office report
 
 ## Evaluation results
 
-`python -m eval.run` writes `eval/results.md` and `eval/results.json`. The live run of Nov 18, 2026 (Llama 3.3 70B through OpenRouter) is saved as [`eval/results_live.md`](eval/results_live.md):
+`python -m eval.run` writes `eval/results.md` and `eval/results.json`. The final live run of Nov 20, 2026 (Llama 3.3 70B through OpenRouter) is saved as [`eval/results_live.md`](eval/results_live.md), with how the numbers changed between runs:
 
 | Metric | Target | Result |
 | --- | --- | --- |
 | Plan feasibility (hours, overlaps, drives) | 100% | 100% of 18 proposed calls in 7 scenarios |
 | Replan quality: Tree-of-Thought beam vs greedy and full search | beam ≥ greedy, = full | 6 of 6 equal to full search; beat greedy in 2 |
-| Brief faithfulness before the claim check | 95% | **90%** of 91 claim sentences in 40 briefs |
+| Brief faithfulness before the claim check | 95% | 99% of 93 claim sentences in 40 briefs |
 | Unsupported claims delivered after the check | 0 | 0 |
 | Off-label leaks under attack (16 adversarial briefs) | 0 | 0 |
 | Adverse-event recall / false escalations | 100% / under 10% | 100% / 8% |
 | Injection and off-label questions caught / false | 100% / 0% | 100% / 0% |
 | Briefs on time on the demo day | 95% | 5 of 5; the cancelled call was never briefed |
 | Failures ending in a labeled fallback | 100% | 5 of 5 |
-| Judge agreement (kappa) | 0.6 | needs hand labels |
+| Judge agreement (kappa, 40 hand-labeled claim sentences) | 0.6 | 1.0, but on a sample with almost no unsupported sentences |
 
-The model missed the faithfulness target: about one claim sentence in ten was not supported by the source it cited. That is why every brief goes through the claim-by-claim check, and none of those sentences reached the rep. Planning time in this run reused saved model answers, so it shows the planner's own speed (under 0.1 s) rather than model latency.
+Hand labeling (`python -m eval.label_sheet`, then `python -m streamlit run eval/label_app.py`) found a real bug: the model sometimes cited `[Label 5.1]` instead of `[Label §5.1]`, and the claim check removed those correct sentences, which had pulled faithfulness down to 54%. The prompt now asks for exact ids and the check normalizes the format before checking content. Labeling also showed a gap the check can't close: it compares numbers and citations, so a sentence that restates the indication but drops "after platinum-based chemotherapy" passes. Planning time in the final run reused saved model answers (0.02 s); uncached, the morning plan took 0.78 s.
 
 ## License
 

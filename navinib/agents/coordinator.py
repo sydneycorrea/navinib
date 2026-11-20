@@ -28,6 +28,7 @@ import hashlib
 import sqlite3
 
 from navinib import guardrails
+from navinib.agents.brief import partial_cause
 from navinib.agents.llm import plain_summary
 from navinib.config import BRIEF_GEN_MARGIN_MIN, BRIEF_READ_MIN, MAX_REFILLS, MAX_RETRIES, POLICY
 from navinib.log import get_logger
@@ -40,7 +41,9 @@ FLOWS = ("morning", "cancellation", "brief_next")   # the only things the Coordi
 
 SUMMARY_SYSTEM = """You are Navinib, a co-pilot for a pharmaceutical field rep. In at most 80 words, tell
 the rep what is proposed for their day and why, mention estimated drive times, any warning and any
-compliance issue that needs their review, and ask them to approve. Use only the data given."""
+compliance issue that needs their review, and ask them to approve. Name every proposed call with its
+time and the doctor or practice (e.g. "13:03 visit Dr. Victor Thackeray"). Use only the data given.
+Plain sentences: no quotation marks around the reply, no headings."""
 
 
 def coordinator(state: dict, config: dict) -> dict:
@@ -264,7 +267,10 @@ def _refill(plan: dict, rnd: int) -> dict:
 
 def _retry(state: dict, issues: list, rnd: int) -> dict:
     """Send each problem back to the agent that caused it, with what Compliance found."""
-    brief_fb = {i["provider_id"]: i["problem"] for i in issues if i["agent"] == "brief"}
+    brief_fb: dict[str, str] = {}
+    for i in issues:   # every problem for a brief goes back, not only the last one
+        if i["agent"] == "brief":
+            brief_fb[i["provider_id"]] = "; ".join(filter(None, [brief_fb.get(i["provider_id"]), i["problem"]]))
     route_ids = sorted({i["provider_id"] for i in issues if i["agent"] == "routing"})
     fb = dict(state.get("feedback", {}))
     fb["brief"] = {**fb.get("brief", {}), **brief_fb}
@@ -285,10 +291,12 @@ def _finish_plan(state: dict, llm, flags: list) -> dict:
             "drive_estimated": plan.get("drive_estimated", False),
             "warnings": state.get("compliance", {}).get("warnings", [])}
     try:
-        message = llm.complete("summary", SUMMARY_SYSTEM, str(data), data=data)
+        message = llm.complete("summary", SUMMARY_SYSTEM, str(data), data=data).strip().strip('"“”\'').strip()
     except Exception as e:  # model down: the rep still gets the plan, without the written summary
         log.warning("summary unavailable: %s", e)
-        message = "Written summary unavailable (model down). " + plain_summary(data)
+        why = "the model is switched off" if "kill switch" in str(e) else (
+            "the daily free-model limit is reached" if "daily" in str(e) else "the model did not answer")
+        message = f"Written summary unavailable ({why}; plan built in code). " + plain_summary(data)
     items = [("ranking and route drafts", "auto", "internal work, kept in the trace"),
              ("plan", "rep_approves", "every calendar change waits for the rep (autonomy level 2)")]
     items += [(f"plan: {f['provider_id']}", "flag", f"{f['problem']} (still failing after {MAX_RETRIES} retries)")
@@ -315,7 +323,7 @@ def _finish_brief(state: dict, con: sqlite3.Connection, flags: list) -> dict:
     con.commit()
     message = f"Brief ready for {v['start']} {v['full_name']}."
     if b["status"] == "partial":
-        message += " It is partial: label and trial sources unavailable, so no product claims."
+        message += f" It is partial ({partial_cause(b.get('why', ''))}), so no product claims."
     for w in state.get("compliance", {}).get("warnings", []):
         message += f" Note: {w}."
     if flags:
@@ -330,8 +338,13 @@ def _finish_brief(state: dict, con: sqlite3.Connection, flags: list) -> dict:
     if checks.get("claims_removed"):
         message += f" {len(checks['claims_removed'])} statement(s) could not be confirmed against the label and were removed."
     risky = flags or b["status"] != "ok" or checks.get("claims_removed") or state.get("compliance", {}).get("warnings")
-    items = [(f"brief {v['event_id']}", "flag" if risky else "auto",
-              "needs a look before the call" if risky else "written inside limits and checked by Compliance (level 3)")]
+    why = ("not confirmed by Compliance: " + "; ".join(f["problem"].removeprefix("unsupported claim: ")
+                                                         for f in flags) if flags else
+           "partial brief, no product claims" if b["status"] != "ok" else
+           "some statements were removed, check what is left" if checks.get("claims_removed") else
+           "the claims check could not run" if risky else
+           "written inside limits and checked by Compliance (level 3)")
+    items = [(f"brief for {v['full_name']}", "flag" if risky else "auto", why)]
     items += [(f"note {e['source_ref']}", "escalate", f"possible adverse event -> {e['routed_to']}") for e in escalations]
     items += [(f"document {r}", "escalate", "instruction-like text, quarantined for admin review")
               for r in checks.get("quarantined", [])]

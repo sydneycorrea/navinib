@@ -12,7 +12,7 @@ from ortools.constraint_solver import pywrapcp, routing_enums_pb2
 from navinib import config
 from navinib.log import get_logger
 from navinib.tools.drive import DriveTimes
-from navinib.tools.schedule import hhmm
+from navinib.tools.schedule import hhmm, up5
 
 DAY_START, DAY_END = 8 * 60, 17 * 60 + 30
 
@@ -60,8 +60,8 @@ def plan_route(start: dict, start_min: int, end_min: int, candidates: list[dict]
     # Rule out what can't work on its own first, so every drop has a plain reason.
     dropped, usable = [], []
     for i, c in enumerate(candidates, 1):
-        arrive = start_min + drive.between(start, pts[i])
-        finish = max(arrive, c["open_min"]) + visit_min
+        arrive = up5(start_min + drive.between(start, pts[i]))
+        finish = up5(max(arrive, c["open_min"])) + visit_min
         if finish > c["close_min"]:
             dropped.append({**_brief(c), "reason": f"closes at {hhmm(c['close_min'])}; earliest finish "
                                                    f"{hhmm(finish)}"})
@@ -113,18 +113,19 @@ def _solve(pts, candidates, usable, start_min, end_min, drive, visit_min, max_vi
     def transit(i, j):
         """Time used leaving node i for node j: the visit at i (if any) plus the drive."""
         a, b = mgr.IndexToNode(i), mgr.IndexToNode(j)
-        return travel(a, b) + (visit_min if 0 < a < end_node else 0)
+        return up5(travel(a, b)) + (visit_min if 0 < a < end_node else 0)   # calls start on 5-minute marks
 
     cb = routing.RegisterTransitCallback(transit)
     routing.SetArcCostEvaluatorOfAllVehicles(cb)
     routing.AddDimension(cb, 24 * 60, 24 * 60, False, "Time")
     time = routing.GetDimensionOrDie("Time")
+    start_min = up5(start_min)
     time.CumulVar(routing.Start(0)).SetRange(start_min, start_min)
     time.CumulVar(routing.End(0)).SetMax(end_min)
     for k, i in enumerate(usable, 1):
         c = candidates[i - 1]
         idx = mgr.NodeToIndex(k)
-        time.CumulVar(idx).SetRange(max(c["open_min"], start_min), min(c["close_min"], end_min) - visit_min)
+        time.CumulVar(idx).SetRange(up5(max(c["open_min"], start_min)), min(c["close_min"], end_min) - visit_min)
         # Leaving a visit out costs its score, so the solver keeps the most valuable ones.
         routing.AddDisjunction([idx], 1000 + int(1000 * c.get("score", 0)))
 

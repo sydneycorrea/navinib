@@ -15,8 +15,13 @@ from navinib.tools.schedule import to_min
 log = get_logger("navinib.agents.compliance")
 
 CLAIMS_SYSTEM = """You check a pre-call brief for a pharmaceutical field rep against its sources.
-List each statement that is not supported by the sources, one per line.
-Reply with exactly PASS if every statement is supported."""
+Each statement cites source ids in square brackets; "sources" maps each id to its text.
+[Schedule] is the rep's calendar: who the call is with, their tier, the time, face to face or
+phone, and the office. Judge each statement only against the text of the sources it cites.
+Advice to the rep (be prepared to..., refer them to Medical Information) needs no source.
+Reply with exactly PASS if every statement is supported. Otherwise reply with one line per
+unsupported statement, starting with "- ", saying in a few words what is not supported."""
+MAX_CLAIM_ISSUES = 3
 
 
 def compliance(state: dict, config: dict) -> dict:
@@ -87,11 +92,21 @@ def _brief_issues(llm, pid: str, b: dict) -> tuple[list, list]:
         return issues, []
     try:
         answer = llm.complete("claims", CLAIMS_SYSTEM,
-                              json.dumps({"brief": b["text"], "sources": b["allowed_refs"]}), data={"brief": b})
+                              json.dumps({"brief": b["text"], "sources": b.get("sources", {})}), data={"brief": b})
     except Exception as e:
         return [], [f"claims check unavailable for {pid} ({e}); rule checks passed"]
-    if not answer.strip().startswith("PASS"):
-        issues.append({"agent": "brief", "provider_id": pid, "problem": f"unsupported claim: {answer.strip()[:200]}"})
+    if not answer.strip().upper().startswith("PASS"):
+        issues += [{"agent": "brief", "provider_id": pid, "problem": f"unsupported claim: {line}"}
+                   for line in claim_lines(answer)]
     return issues, []
+
+
+def claim_lines(answer: str) -> list[str]:
+    """The model's unsupported statements, one per line, each cut at a word boundary (never mid-word
+    or with a stray fragment from the next line)."""
+    raw = [l.strip() for l in answer.strip().splitlines() if l.strip() and l.strip().upper() != "PASS"]
+    bullets = [l for l in raw if l[:1] in "-*•"]
+    lines = [l.lstrip("-*• ").strip() for l in (bullets or raw[:1])] or ["the claims check did not say which statement"]
+    return [l if len(l) <= 160 else l[:160].rsplit(" ", 1)[0] + "…" for l in lines[:MAX_CLAIM_ISSUES]]
 
 

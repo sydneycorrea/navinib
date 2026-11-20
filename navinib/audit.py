@@ -23,8 +23,8 @@ RUNS_PATH = config.ROOT / "logs" / "runs.jsonl"
 
 def prompt_versions() -> dict:
     """A short hash of each system prompt, so a change in behaviour can be traced to a prompt edit."""
-    from navinib.agents import brief, compliance, coordinator   # late import: agents import this module's users
-    prompts = {"brief": brief.SYSTEM, "claims": compliance.CLAIMS_SYSTEM, "summary": coordinator.SUMMARY_SYSTEM,
+    from navinib.agents import brief, chat, compliance, coordinator   # late import: agents import this module's users
+    prompts = {"brief": brief.SYSTEM, "chat": chat.CHAT_SYSTEM, "claims": compliance.CLAIMS_SYSTEM, "summary": coordinator.SUMMARY_SYSTEM,
                "adverse_event": guardrails.AE_SYSTEM}
     return {k: hashlib.sha1(v.encode()).hexdigest()[:8] for k, v in prompts.items()}
 

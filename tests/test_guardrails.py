@@ -283,7 +283,7 @@ def test_every_run_is_logged_as_json_with_a_trace_id(con, tmp_path):
     entry = audit.read(path)[-1]
     assert entry["run_id"] == final["run_id"] and entry["status"] == final["status"]
     assert entry["policy_version"] == config.POLICY["version"] and entry["label_version"] == LABEL_VERSION
-    assert set(entry["prompts"]) == {"brief", "claims", "summary", "adverse_event"}
+    assert set(entry["prompts"]) == {"brief", "chat", "claims", "summary", "adverse_event"}
     assert entry["lanes"] and entry["trace"]
     assert "Robert Hale" not in entry["request"]["message"] and "448812" not in entry["request"]["message"]
 
@@ -419,3 +419,21 @@ def test_when_every_listed_model_fails_it_asks_openrouter_for_free_ones(monkeypa
     monkeypatch.setattr(m, "_call", lambda model, s, u: "ok" if model == "fresh/model:free"
                         else (_ for _ in ()).throw(llm_mod._Skip("gone")))
     assert m.complete("summary", "s", "u") == "ok" and m.model == "fresh/model:free"
+
+
+def test_empty_environment_variable_does_not_hide_dotenv(monkeypatch):
+    """A blank NAVINIB_MODEL in the shell must not hide the paid model named in .env."""
+    monkeypatch.setattr(llm_mod, "_dotenv", lambda: {"NAVINIB_MODEL": "meta-llama/llama-3.3-70b-instruct",
+                                                     "OPENROUTER_API_KEY": "sk-env-file"})
+    monkeypatch.setenv("NAVINIB_MODEL", "")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-shell")
+    s = llm_mod.settings()
+    assert s["NAVINIB_MODEL"] == "meta-llama/llama-3.3-70b-instruct" and s["OPENROUTER_API_KEY"] == "sk-shell"
+
+
+def test_citation_format_is_normalized_before_the_check():
+    """[Label 5.1] is the same source as [Label §5.1]: the claim stays, its numbers still checked."""
+    text, removed = guardrails.claim_check("Neutropenia occurred in 31% of patients [Label 5.1].", SOURCES)
+    assert not removed and "[Label §5.1]" in text
+    _, removed = guardrails.claim_check("Neutropenia occurred in 8% of patients [Label 5.1].", SOURCES)
+    assert removed and removed[0]["why"].startswith("numbers not in the cited source")
