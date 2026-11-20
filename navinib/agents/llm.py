@@ -336,9 +336,15 @@ def _dotenv() -> dict:
     path = ROOT / ".env"
     if not path.exists():
         return {}
-    pairs = (l.split("=", 1) for l in path.read_text(encoding="utf-8").splitlines() if "=" in l
+    pairs = (l.split("=", 1) for l in path.read_text(encoding="utf-8-sig").splitlines() if "=" in l
              and not l.lstrip().startswith("#"))
-    return {k.strip(): v.strip().strip('"') for k, v in pairs}
+    return {k.strip().removeprefix("export ").strip(): v.strip().strip('"').strip("'") for k, v in pairs}
+
+
+def settings() -> dict:
+    """.env values, overridden by environment variables that are set to something (an empty
+    variable, such as a blank Codespaces secret, does not hide the .env value)."""
+    return {**_dotenv(), **{k: v for k, v in os.environ.items() if v.strip()}}
 
 
 PROVIDERS = {"groq": ("GROQ_API_KEY", GroqLLM), "openrouter": ("OPENROUTER_API_KEY", OpenRouterLLM)}
@@ -349,7 +355,7 @@ def get_llm() -> LLM:
     that has a key (Groq, then OpenRouter), answers cached; else the stub."""
     if not POLICY["agents"].get("llm", True):
         return DisabledLLM()
-    env = {**_dotenv(), **os.environ}
+    env = settings()
     models = []
     for p in POLICY["model"]["providers"]:
         var, cls = PROVIDERS[p]
@@ -368,7 +374,7 @@ if __name__ == "__main__":
     # Smoke test: which model is in use, and does it answer?  python -m navinib.agents.llm [--list]
     import sys
     if "--list" in sys.argv:
-        print("\n".join(free_models({**_dotenv(), **os.environ}.get("OPENROUTER_API_KEY", ""))))
+        print("\n".join(free_models(settings().get("OPENROUTER_API_KEY", ""))))
         raise SystemExit
     model = get_llm()
     print(f"Model: {model.name}")

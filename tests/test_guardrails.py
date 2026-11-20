@@ -419,3 +419,13 @@ def test_when_every_listed_model_fails_it_asks_openrouter_for_free_ones(monkeypa
     monkeypatch.setattr(m, "_call", lambda model, s, u: "ok" if model == "fresh/model:free"
                         else (_ for _ in ()).throw(llm_mod._Skip("gone")))
     assert m.complete("summary", "s", "u") == "ok" and m.model == "fresh/model:free"
+
+
+def test_empty_environment_variable_does_not_hide_dotenv(monkeypatch):
+    """A blank NAVINIB_MODEL in the shell must not hide the paid model named in .env."""
+    monkeypatch.setattr(llm_mod, "_dotenv", lambda: {"NAVINIB_MODEL": "meta-llama/llama-3.3-70b-instruct",
+                                                     "OPENROUTER_API_KEY": "sk-env-file"})
+    monkeypatch.setenv("NAVINIB_MODEL", "")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-shell")
+    s = llm_mod.settings()
+    assert s["NAVINIB_MODEL"] == "meta-llama/llama-3.3-70b-instruct" and s["OPENROUTER_API_KEY"] == "sk-shell"

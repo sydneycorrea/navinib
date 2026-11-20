@@ -18,6 +18,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 
 import pandas as pd
+import pydeck as pdk
 import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -106,6 +107,38 @@ def call_summary(start: str, end: str, call_type: str, location_id: str | None, 
     where = office(location_id)
     return {"when": f"{start}–{end}", "icon": icon, "mode": mode, "office": where["name"],
             "address": where["address"], "status": status}
+
+
+def map_stops(events: list, proposed: list) -> list[dict]:
+    """In-person visits for the map, numbered in time order: booked calls (blue) and proposed visits
+    from Plan my day (green). Phone calls have no place to show."""
+    rows = [(e["start"], e["end"], e["title"], e["location_id"], "Booked") for e in events
+            if e["kind"] == "call" and e["location_id"] and e["status"] != "cancelled" and e["call_type"] != "phone"]
+    rows += [(v["start"], v["end"], v["full_name"], v.get("location_id"), "Proposed") for v in proposed
+             if v["call_type"] != "phone" and v.get("location_id")]
+    stops = []
+    for n, (start, end, name, loc_id, status) in enumerate(sorted(rows), 1):
+        loc = con.execute("SELECT lat, lon FROM location WHERE location_id = ?", (loc_id,)).fetchone()
+        if loc:
+            stops.append({"lat": loc["lat"], "lon": loc["lon"], "n": str(n), "status": status,
+                          "color": [31, 95, 168] if status == "Booked" else [30, 122, 60],
+                          "label": f"{n}. {name} · {start}–{end} · {office(loc_id)['name']} ({status.lower()})"})
+    return stops
+
+
+def route_map(stops: list[dict]) -> pdk.Deck:
+    """The day's visits as numbered dots; hovering over one shows who, when and where."""
+    df = pd.DataFrame(stops)
+    dots = pdk.Layer("ScatterplotLayer", df, get_position=["lon", "lat"], get_fill_color="color",
+                     get_radius=9, radius_units="pixels", pickable=True, stroked=True,
+                     get_line_color=[255, 255, 255], line_width_min_pixels=2)
+    numbers = pdk.Layer("TextLayer", df, get_position=["lon", "lat"], get_text="n", get_size=12,
+                        get_color=[255, 255, 255], get_text_anchor="'middle'",
+                        get_alignment_baseline="'center'")
+    view = pdk.data_utils.compute_view(df[["lon", "lat"]], view_proportion=0.9)
+    view.zoom = min(view.zoom, 13)
+    return pdk.Deck(layers=[dots, numbers], initial_view_state=view, map_provider="carto", map_style="light",
+                    tooltip={"text": "{label}"})
 
 
 def calendar(events: list, proposed: list, briefed: set, now_min: int) -> str:
@@ -204,7 +237,11 @@ with st.sidebar:
     view = st.radio("View", ["Rep: my day", "Regional manager"], label_visibility="collapsed")
     times = [hhmm(m) for m in range(7 * 60, 18 * 60 + 1, 5)]
     now_min = to_min(st.selectbox("Time now (simulated)", times, index=times.index("08:20")))
-    st.caption(f"Model: {get_llm().name}")
+    model = get_llm().name
+    st.caption(f"Model: {model}")
+    if model.endswith(":free"):
+        st.caption("Free model. To use the paid one, put NAVINIB_MODEL=meta-llama/llama-3.3-70b-instruct "
+                   "and NAVINIB_ALLOW_PAID=1 in .env, then press R to rerun.")
     if st.button("Reset the demo day"):
         new_session()
         st.rerun()
@@ -240,20 +277,10 @@ if view == "Rep: my day":
                             + f"  \n**Status:** {c['status']}")
 
     with right:
-        points = []
-        for e in schedule["events"]:
-            if e["location_id"] and e["status"] != "cancelled" and e["call_type"] != "phone":
-                loc = con.execute("SELECT lat, lon FROM location WHERE location_id = ?", (e["location_id"],)).fetchone()
-                points.append({"lat": loc["lat"], "lon": loc["lon"], "color": "#1f5fa8"})
-        for v in proposed:
-            if v["call_type"] == "phone":
-                continue
-            loc = con.execute("SELECT lat, lon FROM location WHERE location_id = ?", (v["location_id"],)).fetchone()
-            if loc:
-                points.append({"lat": loc["lat"], "lon": loc["lon"], "color": "#1e7a3c"})
-        if points:
-            st.markdown("**Where** (blue booked, green proposed visits)")
-            st.map(pd.DataFrame(points), color="color", size=60, height=240)
+        stops = map_stops(schedule["events"], proposed)
+        if stops:
+            st.markdown("**Where** (blue booked, green proposed visits; hover over a dot)")
+            st.pydeck_chart(route_map(stops), height=240)
         st.markdown("**What do you need?**")
         a, b, c = st.columns(3)
         if a.button("Plan my day", use_container_width=True):
