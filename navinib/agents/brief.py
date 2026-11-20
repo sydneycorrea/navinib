@@ -35,7 +35,19 @@ Use only the facts in the input. Put the source id in square brackets after each
 Talking points may come only from the approved label (refs starting 'Label') or approved trials.
 Never mention anything listed in do_not_raise; if the provider may ask about it, say to refer
 them to Medical Information. The only drug name you may use is Product X.
+Facts about the call itself (who, tier, time, face to face or phone, office) come from the
+schedule: cite them as [Schedule].
 If feedback is given, it is what Compliance rejected last time: fix exactly that."""
+
+
+def schedule_source(con, v: dict, inputs: dict) -> str:
+    """The call's own facts from the calendar, as a source the brief can cite as [Schedule]."""
+    how = "phone call" if v["call_type"] == "phone" else "face-to-face call"
+    row = con.execute("SELECT affiliation, address FROM location WHERE location_id = ?",
+                      (v.get("location_id"),)).fetchone() if v.get("location_id") else None
+    where = f" at {row['affiliation']}, {row['address']}" if row else ""
+    return (f"{inputs.get('full_name', v.get('full_name', ''))}, tier {inputs.get('tier', '?')}: "
+            f"{how} {v['start']}-{v['end']}{where}.")
 
 
 def brief(payload: dict, config: dict) -> dict:
@@ -53,14 +65,16 @@ def brief(payload: dict, config: dict) -> dict:
 
     with _RETRIEVAL:   # escalations share the connection too
         inputs, checks = _screen_inputs(cfg["con"], cfg["llm"], inputs, payload)
-    sources = {n["ref"]: n["text"] for n in inputs["call_notes"]}
+    with _RETRIEVAL:
+        sources = {"Schedule": schedule_source(cfg["con"], v, inputs)}
+    sources |= {n["ref"]: n["text"] for n in inputs["call_notes"]}
     sources |= {t["ref"]: t["text"] for t in inputs["talking_points"]}
     sources |= {t["ref"]: t["text"] for t in inputs.get("trials", []) if t["status"] == "approved"}
     sources |= {p["pub_id"]: f"{p['title']}. {p.get('abstract') or ''}" for p in inputs["publications"]
                 if p["may_discuss"]}
     allowed = sorted(sources)
     model_inputs = {k: v for k, v in inputs.items() if k != "trials"}
-    user = json.dumps({"visit": v, "inputs": model_inputs, "feedback": payload.get("feedback")}, default=str)
+    user = json.dumps({"visit": v, "schedule": sources["Schedule"], "inputs": model_inputs, "feedback": payload.get("feedback")}, default=str)
     try:
         text = cfg["llm"].complete("brief", SYSTEM, user,
                                    data={"visit": v, "inputs": inputs, "feedback": payload.get("feedback")})
@@ -76,7 +90,7 @@ def brief(payload: dict, config: dict) -> dict:
                                                        if t.get("version")}),
                              "do_not_raise": [d["ref"] for d in inputs["do_not_raise"]], "round": payload["round"],
                              "checks": checks}},
-            "trace": [f"brief {pid}: written (round {payload['round']}, cites {', '.join(citations(text))})"
+            "trace": [f"brief {pid}: written (round {payload['round']}, cites {', '.join(dict.fromkeys(citations(text))) or 'nothing'})"
                       + extra]}
 
 

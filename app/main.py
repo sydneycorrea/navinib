@@ -11,6 +11,7 @@ Each browser session works on its own copy of the synthetic demo day, so nothing
 touches data/navinib.db. Everything is synthetic.
 """
 import html
+import math
 import sys
 import tempfile
 import uuid
@@ -130,13 +131,18 @@ def route_map(stops: list[dict]) -> pdk.Deck:
     """The day's visits as numbered dots; hovering over one shows who, when and where."""
     df = pd.DataFrame(stops)
     dots = pdk.Layer("ScatterplotLayer", df, get_position=["lon", "lat"], get_fill_color="color",
-                     get_radius=9, radius_units="pixels", pickable=True, stroked=True,
+                     get_radius=9, radius_units="'pixels'", pickable=True, stroked=True,
                      get_line_color=[255, 255, 255], line_width_min_pixels=2)
     numbers = pdk.Layer("TextLayer", df, get_position=["lon", "lat"], get_text="n", get_size=12,
                         get_color=[255, 255, 255], get_text_anchor="'middle'",
                         get_alignment_baseline="'center'")
-    view = pdk.data_utils.compute_view(df[["lon", "lat"]], view_proportion=0.9)
-    view.zoom = min(view.zoom, 13)
+    # Fit every stop in a map about 480 x 240 px (deck.gl uses 512 px tiles; pydeck's compute_view zooms in too far).
+    lon_span = max(df["lon"].max() - df["lon"].min(), 0.01) * 1.6
+    lat_span = max(df["lat"].max() - df["lat"].min(), 0.01) * 1.6
+    zoom = min(math.log2(480 * 360 / 512 / lon_span),
+               math.log2(240 * 360 / 512 / lat_span / math.cos(math.radians(df["lat"].mean()))), 14)
+    view = pdk.ViewState(latitude=(df["lat"].max() + df["lat"].min()) / 2,
+                         longitude=(df["lon"].max() + df["lon"].min()) / 2, zoom=zoom)
     return pdk.Deck(layers=[dots, numbers], initial_view_state=view, map_provider="carto", map_style="light",
                     tooltip={"text": "{label}"})
 
@@ -219,7 +225,9 @@ def show_result(result: dict) -> None:
             st.rerun()
     for b in (result.get("briefs") or {}).values():
         if status == "brief_ready":
-            st.markdown(f"**Brief** ({b['status']})")
+            label = ("needs your review" if result.get("flags") else
+                     "partial" if b["status"] == "partial" else "checked by Compliance")
+            st.markdown(f"**Brief** ({label})")
             st.code(b["text"], language=None, wrap_lines=True)
     if result.get("lanes"):
         st.markdown("**Who acts on what**")
