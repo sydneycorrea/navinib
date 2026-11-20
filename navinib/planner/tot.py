@@ -304,8 +304,8 @@ def _reason(best: Plan, alternatives: list[Plan]) -> str:
     if not alternatives:
         return f"the only plan that fits (value {best.value():.2f})"
     nxt = alternatives[0]
-    return (f"{best.shape()} earns {best.value():.2f}, more than the best {nxt.shape()} plan "
-            f"({nxt.value():.2f}: {nxt.label()})")
+    return (f"this plan ({best.label()}) earns {best.value():.2f}, more than the next best, "
+            f"{nxt.shape()} ({nxt.value():.2f}: {nxt.label()})")
 
 
 def _out(p: Plan) -> dict:

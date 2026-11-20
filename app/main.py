@@ -202,8 +202,13 @@ def calendar(events: list, proposed: list, briefed: set, now_min: int) -> str:
     for e in events:
         sub = f"{e['start']}–{e['end']}"
         if e["status"] == "cancelled":
-            rows.append(block(e["start_min"], e["end_min"], e["title"], sub + " · cancelled", "#f3f4f6", "#9ca3af",
-                              "text-decoration:line-through;color:#9ca3af"))
+            covered = any(to_min(v["start"]) < e["end_min"] and e["start_min"] < to_min(v["end"]) for v in proposed)
+            # Drawn behind and faint; when new calls fill its time, it keeps only a thin edge so nothing overlaps.
+            rows.append(block(e["start_min"], e["end_min"], "" if covered else e["title"],
+                              "" if covered else sub + " · cancelled", "#f3f4f6", "#d1d5db",
+                              "text-decoration:line-through;color:#9ca3af;z-index:0;opacity:.6"
+                              + (";right:auto;width:0;padding:0" if covered else ""),
+                              tip=f"{e['title']} {sub} · cancelled"))
         elif e["kind"] == "call":
             c = call_summary(e["start"], e["end"], e["call_type"], e["location_id"],
                              "Brief ready" if e["event_id"] in briefed else "")
@@ -235,7 +240,7 @@ def show_result(result: dict) -> None:
     if plan and status == "awaiting_approval":
         if plan.get("reason"):
             st.caption(f"Why this plan: {plan['reason']}")
-        for a in plan.get("alternatives", []):
+        for a in plan.get("alternatives", [])[1:]:   # the next best is already named in "Why this plan"
             st.caption(f"Alternative ({a['value']:.2f}): {a['summary']}")
         c1, c2 = st.columns(2)
         st.caption("Approve here, or say \"book it\" or \"reject\" in the chat.")

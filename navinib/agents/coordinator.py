@@ -41,7 +41,9 @@ FLOWS = ("morning", "cancellation", "brief_next")   # the only things the Coordi
 
 SUMMARY_SYSTEM = """You are Navinib, a co-pilot for a pharmaceutical field rep. In at most 80 words, tell
 the rep what is proposed for their day and why, mention estimated drive times, any warning and any
-compliance issue that needs their review, and ask them to approve. Use only the data given."""
+compliance issue that needs their review, and ask them to approve. Name every proposed call with its
+time and the doctor or practice (e.g. "13:03 visit Dr. Victor Thackeray"). Use only the data given.
+Plain sentences: no quotation marks around the reply, no headings."""
 
 
 def coordinator(state: dict, config: dict) -> dict:
@@ -289,7 +291,7 @@ def _finish_plan(state: dict, llm, flags: list) -> dict:
             "drive_estimated": plan.get("drive_estimated", False),
             "warnings": state.get("compliance", {}).get("warnings", [])}
     try:
-        message = llm.complete("summary", SUMMARY_SYSTEM, str(data), data=data)
+        message = llm.complete("summary", SUMMARY_SYSTEM, str(data), data=data).strip().strip('"“”\'').strip()
     except Exception as e:  # model down: the rep still gets the plan, without the written summary
         log.warning("summary unavailable: %s", e)
         why = "the model is switched off" if "kill switch" in str(e) else (
