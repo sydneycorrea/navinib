@@ -4,6 +4,7 @@ The scenarios come from the 6.1 plan: Dr. Lee's office reports a patient hospita
 rash (adverse event, with a patient name to redact), a memo in Dr. Okafor's notes tries to
 steer the model (injection), and a rep asks about first-line use (off-label question).
 """
+import json
 import pytest
 
 from navinib import audit, config, guardrails
@@ -261,11 +262,16 @@ def test_only_free_models_at_low_temperature(monkeypatch):
     with pytest.raises(ValueError):
         OpenRouterLLM("key", "openai/gpt-4o")
     m = OpenRouterLLM("key")
-    assert m.model.endswith(":free") and m.temperature == 0.2
+    assert all(q.endswith(":free") for q in m.queue) and m.temperature == 0.2
     monkeypatch.setenv("OPENROUTER_API_KEY", "sk-test")
     monkeypatch.setattr(llm_mod, "_dotenv", lambda: {})
-    assert isinstance(get_llm(), OpenRouterLLM)
+    llm = get_llm()
+    assert isinstance(llm, llm_mod.CachedLLM) and isinstance(llm.inner, OpenRouterLLM)
+    monkeypatch.setenv("GROQ_API_KEY", "gsk-test")
+    chain = get_llm().inner
+    assert isinstance(chain, llm_mod.ChainLLM) and [m.provider for m in chain.models] == ["groq", "openrouter"]
     monkeypatch.setenv("OPENROUTER_API_KEY", "")
+    monkeypatch.setenv("GROQ_API_KEY", "")
     assert isinstance(get_llm(), StubLLM)
 
 
@@ -280,3 +286,136 @@ def test_every_run_is_logged_as_json_with_a_trace_id(con, tmp_path):
     assert set(entry["prompts"]) == {"brief", "claims", "summary", "adverse_event"}
     assert entry["lanes"] and entry["trace"]
     assert "Robert Hale" not in entry["request"]["message"] and "448812" not in entry["request"]["message"]
+
+
+def test_a_retired_free_model_is_skipped_for_the_next_one(monkeypatch):
+    """OpenRouter retires free models often: a 404 moves on to the next free model, never a paid one."""
+    m = OpenRouterLLM("key")
+    first, second = m.queue[0], m.queue[1]
+    calls = []
+
+    def fake(model, system, user):
+        calls.append(model)
+        if model == first:
+            raise llm_mod._Skip(f"{model} -> 404: This model is unavailable for free")
+        return "hello"
+    monkeypatch.setattr(m, "_call", fake)
+    assert m.complete("summary", "s", "u") == "hello"
+    assert calls == [first, second] and m.model == second and m.tried == [first]
+    assert m.complete("summary", "s", "u") == "hello" and calls[-1] == second   # stays on the working one
+
+
+def test_a_model_refused_for_this_client_is_skipped(monkeypatch):
+    """A 403 such as "only available on agentic harnesses" moves on; a 401 (bad key) does not."""
+    import io
+    import urllib.error
+    m = OpenRouterLLM("key", "harness/only:free")
+    monkeypatch.setattr(llm_mod, "free_models", lambda key="": ["harness/only:free", "works/model:free"])
+
+    def fake_open(req, timeout=None):
+        model = json.loads(req.data)["model"]
+        if model == "harness/only:free":
+            raise urllib.error.HTTPError(req.full_url, 403, "Forbidden", {}, io.BytesIO(b"agentic harnesses only"))
+        raise urllib.error.HTTPError(req.full_url, 401, "Unauthorized", {}, io.BytesIO(b"bad key"))
+    monkeypatch.setattr(llm_mod.urllib.request, "urlopen", fake_open)
+    with pytest.raises(RuntimeError, match="401"):
+        m.complete("summary", "s", "u")
+    assert m.tried == ["harness/only:free"] and m.model == "works/model:free"
+
+
+def _http_error(code, body, headers=None):
+    import io
+    import urllib.error
+    return urllib.error.HTTPError("https://x", code, "err", headers or {}, io.BytesIO(body.encode()))
+
+
+def test_the_daily_free_limit_stops_at_once_and_the_next_provider_takes_over(monkeypatch):
+    """Every OpenRouter free model shares one daily limit: hitting it must not burn calls on the others."""
+    calls = []
+
+    def fake_open(req, timeout=None):
+        calls.append(json.loads(req.data)["model"])
+        raise _http_error(429, "Rate limit exceeded: free-models-per-day")
+    monkeypatch.setattr(llm_mod.urllib.request, "urlopen", fake_open)
+    router = OpenRouterLLM("key")
+    backup = StubLLM()
+    chain = llm_mod.ChainLLM([router, backup])
+    assert chain.complete("claims", "s", "u") == "PASS"          # answered by the next provider
+    assert len(calls) == 1 and router.exhausted and chain.name == "stub"
+    with pytest.raises(RuntimeError, match="daily free limit"):
+        router.complete("summary", "s", "u")
+    assert len(calls) == 1                     # no more calls once exhausted
+
+
+def test_a_per_minute_rate_limit_waits_and_retries_the_same_model(monkeypatch):
+    m = llm_mod.GroqLLM("key")
+    waits, n = [], {"calls": 0}
+    m.sleep = waits.append
+
+    class Ok:
+        def __enter__(self):
+            import io
+            return io.BytesIO(json.dumps({"choices": [{"message": {"content": "hi"}}]}).encode())
+
+        def __exit__(self, *a):
+            return False
+
+    def fake_open(req, timeout=None):
+        n["calls"] += 1
+        if n["calls"] == 1:
+            raise _http_error(429, "Rate limit reached for tokens per minute", {"retry-after": "2"})
+        return Ok()
+    monkeypatch.setattr(llm_mod.urllib.request, "urlopen", fake_open)
+    assert m.complete("summary", "s", "u") == "hi" and waits == [2.0] and m.tried == []
+
+
+def test_a_busy_model_is_passed_over_for_one_call_not_dropped(monkeypatch):
+    """Upstream rate limits and empty answers are temporary: the model is tried again next call."""
+    m = OpenRouterLLM("key", "busy/model:free")
+    monkeypatch.setattr(llm_mod, "free_models", lambda key="": ["backup/model:free"])
+    state = {"busy": True}
+
+    def fake(model, system, user):
+        if model == "busy/model:free" and state["busy"]:
+            raise llm_mod._Skip("busy/model:free returned no text")
+        return model
+    monkeypatch.setattr(m, "_call", fake)
+    assert m.complete("summary", "s", "u") == "backup/model:free"
+    state["busy"] = False
+    assert "busy/model:free" not in m.dead
+    assert m.complete("summary", "s", "u") == "backup/model:free"      # the one that answered goes first
+    m.queue.remove("backup/model:free")
+    assert m.complete("summary", "s", "u") == "busy/model:free"
+
+
+def test_a_paid_model_needs_an_explicit_opt_in(monkeypatch):
+    with pytest.raises(ValueError, match="NAVINIB_ALLOW_PAID"):
+        OpenRouterLLM("key", "meta-llama/llama-3.3-70b-instruct")
+    assert OpenRouterLLM("key", "meta-llama/llama-3.3-70b-instruct", allow_paid=True).model == \
+        "meta-llama/llama-3.3-70b-instruct"
+    monkeypatch.setattr(llm_mod, "_dotenv", lambda: {})
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-test")
+    monkeypatch.setenv("NAVINIB_MODEL", "meta-llama/llama-3.3-70b-instruct")
+    monkeypatch.setenv("NAVINIB_ALLOW_PAID", "1")
+    assert get_llm().name == "openrouter:meta-llama/llama-3.3-70b-instruct"
+
+
+def test_answers_are_cached_so_reruns_spend_no_quota(tmp_path):
+    class Counting:
+        name, n = "fake:model", 0
+
+        def complete(self, task, system, user, data=None):
+            Counting.n += 1
+            return f"answer {Counting.n}"
+    c = llm_mod.CachedLLM(Counting(), tmp_path)
+    assert c.complete("brief", "s", "u") == "answer 1"
+    assert llm_mod.CachedLLM(Counting(), tmp_path).complete("brief", "s", "u") == "answer 1"
+    assert Counting.n == 1 and c.complete("brief", "s", "other") == "answer 2"
+
+
+def test_when_every_listed_model_fails_it_asks_openrouter_for_free_ones(monkeypatch):
+    m = OpenRouterLLM("key", "only/one:free")
+    monkeypatch.setattr(llm_mod, "free_models", lambda key="": ["only/one:free", "fresh/model:free"])
+    monkeypatch.setattr(m, "_call", lambda model, s, u: "ok" if model == "fresh/model:free"
+                        else (_ for _ in ()).throw(llm_mod._Skip("gone")))
+    assert m.complete("summary", "s", "u") == "ok" and m.model == "fresh/model:free"
