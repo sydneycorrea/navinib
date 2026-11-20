@@ -37,7 +37,7 @@ from navinib.log import get_logger
 from navinib.tools.drive import DriveTimes
 from navinib.tools.providers import provider_lookup, provider_scoring
 from navinib.tools.route import free_windows
-from navinib.tools.schedule import hhmm, schedule_lookup
+from navinib.tools.schedule import hhmm, schedule_lookup, up5
 
 log = get_logger("navinib.planner.tot")
 
@@ -135,7 +135,7 @@ def _fit(plan: Plan, c: dict, call_type: str, end_min: int, drive: DriveTimes) -
         drive_min, length = drive.between(plan.at, point), config.VISIT_MIN
     else:
         point, drive_min, length = plan.at, 0, config.PHONE_MIN
-    start = max(plan.now_min + drive_min, c["open_min"])
+    start = up5(max(plan.now_min + drive_min, c["open_min"]))
     end = start + length
     if end > c["close_min"]:
         return None, f"closes {hhmm(c['close_min'])}, earliest finish {hhmm(end)}"

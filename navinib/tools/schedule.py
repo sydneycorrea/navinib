@@ -6,6 +6,11 @@ from navinib.log import get_logger
 log = get_logger("navinib.tools.schedule")
 
 
+def up5(minutes: int) -> int:
+    """Round up to the next 5 minutes, so proposed calls start at times a person would book (13:05, not 13:03)."""
+    return -(-minutes // 5) * 5
+
+
 def hhmm(minutes: int) -> str:
     """Turn minutes after midnight into 'HH:MM' (e.g. 870 -> '14:30')."""
     return f"{minutes // 60:02d}:{minutes % 60:02d}"

@@ -35,7 +35,7 @@ def test_checkpoint_4_1_story_with_real_drive_times(con):
     r = _replan(con, drive)
     assert r["window"] == {"start": "14:00", "end": "15:30"}
     assert [(s["provider_id"], s["start"], s["end"]) for s in r["chosen"]["steps"]] == \
-        [(LEE, "14:10", "14:40"), (MARCHETTI, "14:57", "15:27")]
+        [(LEE, "14:10", "14:40"), (MARCHETTI, "15:00", "15:30")]   # starts rounded up to 5 minutes
     assert [a["shape"] for a in r["alternatives"]] == ["1 phone + 1 visit", "1 visit"]
     assert r["alternatives"][0]["steps"][0]["provider_id"] == HILLCREST
     assert "more than the next best, 1 phone + 1 visit" in r["reason"] and r["reason"].startswith("this plan (visit")
