@@ -431,8 +431,10 @@ def judge_row() -> str:
     s = score()
     if not s or not s["labeled"]:
         return "| Judge agreement (kappa, hand-labeled claim sentences) | 0.6 or higher | needs hand labels |"
+    k = "undefined (one class only)" if s["kappa"] is None else s["kappa"]
     return (f"| Judge agreement (kappa, {s['labeled']} hand-labeled claim sentences) | 0.6 or higher | "
-            f"{s['kappa']} (agreement {pct(s['agreement'])}) |")
+            f"{k} (agreement {pct(s['agreement'])}; unsupported: {s['human_unsupported']} by hand, "
+            f"{s['check_unsupported']} by the check) |")
 
 
 def main(quick: bool = False) -> dict:

@@ -95,7 +95,7 @@ def kappa(a: list[bool], b: list[bool]) -> float | None:
     po = sum(x == y for x, y in zip(a, b)) / n
     pa, pb = sum(a) / n, sum(b) / n
     pe = pa * pb + (1 - pa) * (1 - pb)
-    return 1.0 if pe == 1 else round((po - pe) / (1 - pe), 3)
+    return None if pe == 1 else round((po - pe) / (1 - pe), 3)   # undefined when both raters use one class
 
 
 def score() -> dict | None:
@@ -108,6 +108,7 @@ def score() -> dict | None:
     human = [answers[r["id"]] == "supported" for r in done]
     check = [r["check"] == "supported" for r in done]
     out = {"labeled": len(done), "of": len(rows), "kappa": kappa(human, check),
+           "human_unsupported": human.count(False), "check_unsupported": check.count(False),
            "agreement": round(sum(h == c for h, c in zip(human, check)) / len(done), 3) if done else None,
            "check_too_strict": [r["id"] for r, h, c in zip(done, human, check) if h and not c],
            "check_too_lenient": [r["id"] for r, h, c in zip(done, human, check) if c and not h]}

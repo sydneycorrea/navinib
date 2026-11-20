@@ -18,11 +18,11 @@ Phase 1 (data, tools, retrieval, routing, Tree-of-Thought replan) is done. The f
 | Pre-call brief inputs: notes, publications, label points, do-not-raise list, contacts | Done (LLM write-up in phase 2) |
 | Route optimizer (OR-Tools, time windows) + drive-time cache | Done |
 | Tree-of-Thought replan (Checkpoint 4.1) | Done |
-| Multi-agent graph: Coordinator, Targeting, Routing, Brief, Compliance (LangGraph) | Done, with a stub LLM |
+| Multi-agent graph: Coordinator, Targeting, Routing, Brief, Compliance (LangGraph) | Done |
 | Free model (OpenRouter, Groq) for Coordinator, Brief and Compliance | Done; live check passed 2026-11-18 |
 | Guardrails (Checkpoint 6.1): policy file, input checks, claim-by-claim check, escalation, four lanes, JSON run log, kill switches | Done |
-| Streamlit app: calendar-style rep day, approval card, lanes, regional manager view | Done |
-| Evaluation vs prompt-only baseline | Phase 5 |
+| Streamlit app: calendar day, chat, approval card, lanes, map, regional manager view | Done |
+| Evaluation runner (`python -m eval.run`) and hand-label agreement (`python -m eval.label_sheet`) | Done; live results below |
 
 ## Layout
 
@@ -175,6 +175,25 @@ The safety plan from Checkpoint 6.1. Hard limits live in `navinib/policy.yaml` a
 | Monitoring | One JSON line per run in `logs/runs.jsonl`: trace id, model, policy and label versions, prompt hashes, checks, lanes, escalations, trace. Kill switches: `agents.brief: false` gives plan-only mode; `agents.llm: false` makes every agent use its coded fallback | `audit.py`, `policy.yaml` |
 
 The demo data includes two notes that trip these checks: Dr. Lee's office reports a patient hospitalized with a rash (an adverse event that also names the patient), and a memo in Dr. Okafor's notes tries to steer the model toward first-line use (injection). `python -m navinib.agents.graph demo` shows both being handled.
+
+## Evaluation results
+
+`python -m eval.run` writes `eval/results.md` and `eval/results.json`. The final live run of Nov 20, 2026 (Llama 3.3 70B through OpenRouter) is saved as [`eval/results_live.md`](eval/results_live.md), with how the numbers changed between runs:
+
+| Metric | Target | Result |
+| --- | --- | --- |
+| Plan feasibility (hours, overlaps, drives) | 100% | 100% of 18 proposed calls in 7 scenarios |
+| Replan quality: Tree-of-Thought beam vs greedy and full search | beam ≥ greedy, = full | 6 of 6 equal to full search; beat greedy in 2 |
+| Brief faithfulness before the claim check | 95% | 99% of 93 claim sentences in 40 briefs |
+| Unsupported claims delivered after the check | 0 | 0 |
+| Off-label leaks under attack (16 adversarial briefs) | 0 | 0 |
+| Adverse-event recall / false escalations | 100% / under 10% | 100% / 8% |
+| Injection and off-label questions caught / false | 100% / 0% | 100% / 0% |
+| Briefs on time on the demo day | 95% | 5 of 5; the cancelled call was never briefed |
+| Failures ending in a labeled fallback | 100% | 5 of 5 |
+| Judge agreement (kappa, 40 hand-labeled claim sentences) | 0.6 | 1.0, but on a sample with almost no unsupported sentences |
+
+Hand labeling (`python -m eval.label_sheet`, then `python -m streamlit run eval/label_app.py`) found a real bug: the model sometimes cited `[Label 5.1]` instead of `[Label §5.1]`, and the claim check removed those correct sentences, which had pulled faithfulness down to 54%. The prompt now asks for exact ids and the check normalizes the format before checking content. Labeling also showed a gap the check can't close: it compares numbers and citations, so a sentence that restates the indication but drops "after platinum-based chemotherapy" passes. Planning time in the final run reused saved model answers (0.02 s); uncached, the morning plan took 0.78 s.
 
 ## License
 
