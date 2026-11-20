@@ -25,6 +25,7 @@ import streamlit as st
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from navinib import audit, config  # noqa: E402
+from navinib.agents.chat import HELP, respond  # noqa: E402
 from navinib.agents.coordinator import approve_plan  # noqa: E402
 from navinib.agents.graph import brief_next_call, run  # noqa: E402
 from navinib.agents.llm import get_llm  # noqa: E402
@@ -62,14 +63,42 @@ def new_session() -> None:
     path = folder / f"{uuid.uuid4().hex}.db"
     generate(path)
     st.session_state.update(db=str(path), result=None, kind=None, log=folder / f"{path.stem}.jsonl",
-                            history=[])
+                            history=[], chat=[{"role": "assistant", "text": "Good morning. " + HELP}])
 
 
 if "db" not in st.session_state:
     new_session()
+st.session_state.setdefault("chat", [{"role": "assistant", "text": "Good morning. " + HELP}])
 con = connect(st.session_state["db"])
 col = retrieval_index()
 drive = DriveTimes()
+
+
+def say(role: str, text: str) -> None:
+    """Add a turn to the conversation (the rep's words, or Navinib's answer)."""
+    if text:
+        st.session_state["chat"].append({"role": role, "text": text})
+
+
+def decide(result: dict, approved: bool) -> None:
+    """The rep approved or rejected the waiting plan, by button or in the chat."""
+    plan = result["plan"]
+    if approved:
+        ids = approve_plan(con, result)
+        record_decision("accepted", f"{result['request']['flow']}: {', '.join(ids)}")
+        say("assistant", f"Booked {len(ids)} call(s). They are on your calendar now.")
+    else:
+        record_decision("rejected", f"{result['request']['flow']}: {len(plan['visits'])} call(s) proposed")
+        say("assistant", "Plan rejected: nothing was booked, and your day is unchanged.")
+    st.session_state["result"] = None
+
+
+def act(label: str, fn) -> None:
+    """A button press, shown in the conversation as if the rep had typed it."""
+    say("user", label)
+    st.session_state["result"] = fn()
+    say("assistant", st.session_state["result"].get("message", ""))
+    st.rerun()
 
 
 def record_decision(decision: str, detail: str) -> None:
@@ -201,8 +230,7 @@ def calendar(events: list, proposed: list, briefed: set, now_min: int) -> str:
 def show_result(result: dict) -> None:
     """The latest answer from Navinib: message, proposed plan or brief, and the lanes."""
     status = result["status"]
-    st.markdown(f"**Navinib** · `{status}` · trace `{result.get('run_id', '')}`")
-    st.info(result.get("message") or "")
+    st.markdown(f"**Latest result** · `{status}` · trace `{result.get('run_id', '')}`")
     plan = result.get("plan")
     if plan and status == "awaiting_approval":
         if plan.get("reason"):
@@ -210,18 +238,14 @@ def show_result(result: dict) -> None:
         for a in plan.get("alternatives", []):
             st.caption(f"Alternative ({a['value']:.2f}): {a['summary']}")
         c1, c2 = st.columns(2)
+        st.caption("Approve here, or say \"book it\" or \"reject\" in the chat.")
         if c1.button("Approve and book", type="primary", use_container_width=True):
-            ids = approve_plan(con, result)
-            record_decision("accepted", f"{result['request']['flow']}: {', '.join(ids)}")
-            st.session_state["result"] = None
-            st.session_state["history"].append(f"Approved: booked {len(ids)} call(s)")
-            st.session_state["notice"] = f"Booked {len(ids)} call(s). They are on your calendar now."
+            say("user", "Approve and book")
+            decide(result, True)
             st.rerun()
         if c2.button("Reject", use_container_width=True):
-            record_decision("rejected", f"{result['request']['flow']}: {len(plan['visits'])} call(s) proposed")
-            st.session_state["result"] = None
-            st.session_state["history"].append("Rejected the proposed plan")
-            st.session_state["notice"] = "Plan rejected: nothing was booked, and your day is unchanged."
+            say("user", "Reject")
+            decide(result, False)
             st.rerun()
     for b in (result.get("briefs") or {}).values():
         if status == "brief_ready":
@@ -289,38 +313,42 @@ if view == "Rep: my day":
         if stops:
             st.markdown("**Where** (blue booked, green proposed visits; hover over a dot)")
             st.pydeck_chart(route_map(stops), height=240)
-        st.markdown("**What do you need?**")
+        st.markdown("**Talk to Navinib**")
         a, b, c = st.columns(3)
         if a.button("Plan my day", use_container_width=True):
-            st.session_state["result"] = run(con, {"flow": "morning", "rep_id": REP, "day": DAY, "now_min": now_min},
-                                             col=col, drive=drive, log_path=st.session_state["log"])
-            st.rerun()
+            act("Plan my day", lambda: run(con, {"flow": "morning", "rep_id": REP, "day": DAY, "now_min": now_min},
+                                           col=col, drive=drive, log_path=st.session_state["log"]))
         if b.button("Brief my next call", use_container_width=True):
-            st.session_state["result"] = brief_next_call(con, REP, DAY, now_min, col=col, drive=drive,
-                                                         log_path=st.session_state["log"])
-            st.rerun()
+            act("Brief my next call", lambda: brief_next_call(con, REP, DAY, now_min, col=col, drive=drive,
+                                                              log_path=st.session_state["log"]))
         calls = [e for e in schedule["events"] if e["kind"] == "call" and e["status"] != "cancelled"
                  and e["end_min"] > now_min]
         with c.popover("A call cancelled", use_container_width=True):
             pick = st.selectbox("Which call?", calls, format_func=lambda e: f"{e['start']} {e['title']}")
             if st.button("Replan around it", disabled=not calls):
-                st.session_state["result"] = run(con, {"flow": "cancellation", "rep_id": REP, "day": DAY,
-                                                       "event_id": pick["event_id"], "now_min": now_min},
-                                                 col=col, drive=drive, log_path=st.session_state["log"])
-                st.rerun()
-        ask = st.chat_input("Tell Navinib something, e.g. a question from a doctor")
+                act(f"My {pick['start']} call ({pick['title']}) cancelled",
+                    lambda: run(con, {"flow": "cancellation", "rep_id": REP, "day": DAY,
+                                      "event_id": pick["event_id"], "now_min": now_min},
+                                col=col, drive=drive, log_path=st.session_state["log"]))
+        with st.container(height=340):
+            for turn in st.session_state["chat"]:
+                with st.chat_message(turn["role"], avatar="🧭" if turn["role"] == "assistant" else None):
+                    st.markdown(turn["text"].replace("$", "\\$"))
+        ask = st.chat_input("Ask or tell Navinib, e.g. \"what should I avoid with Dr. Okafor?\"")
         if ask:
-            st.session_state["result"] = run(con, {"flow": "question", "rep_id": REP, "day": DAY,
-                                                   "now_min": now_min, "message": ask},
-                                             col=col, drive=drive, log_path=st.session_state["log"])
+            say("user", ask)
+            with st.spinner("Navinib is working on it..."):
+                r = respond(con, ask, REP, DAY, now_min, pending=result, col=col, drive=drive,
+                            log_path=st.session_state["log"])
+            if r["intent"] in ("approve", "reject"):
+                decide(result, r["intent"] == "approve")
+            else:
+                say("assistant", r["text"])
+                if r["result"] is not None:
+                    st.session_state["result"] = r["result"]
             st.rerun()
-        notice = st.session_state.pop("notice", None)
-        if notice:
-            st.success(notice)
         if result:
             show_result(result)
-        for h in st.session_state["history"][-3:]:
-            st.caption(h)
 
 # ---------- regional manager view ----------
 

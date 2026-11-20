@@ -14,7 +14,21 @@ def test_rep_view_plans_the_day_and_waits_for_approval():
     assert not at.exception
     assert any("awaiting_approval" in m.value for m in at.markdown)
     next(b for b in at.button if b.label == "Approve and book").click().run()
-    assert not at.exception and any("Approved: booked" in c.value for c in at.caption)
+    assert not at.exception and any("Booked" in m.value for m in at.markdown)
+    assert at.session_state["chat"][-1]["text"].startswith("Booked")
+
+
+def test_chat_box_answers_and_shows_the_conversation():
+    at = AppTest.from_file(APP, default_timeout=120).run()
+    at.chat_input[0].set_value("what should I avoid with Dr. Okafor?").run()
+    assert not at.exception
+    turns = at.session_state["chat"]
+    assert turns[-2] == {"role": "user", "text": "what should I avoid with Dr. Okafor?"}
+    assert "Medical Information" in turns[-1]["text"]
+    at.chat_input[0].set_value("plan my day").run()
+    assert any("awaiting_approval" in m.value for m in at.markdown)
+    at.chat_input[0].set_value("book it").run()
+    assert at.session_state["chat"][-1]["text"].startswith("Booked")
 
 
 def test_manager_view_is_read_only_team_level():

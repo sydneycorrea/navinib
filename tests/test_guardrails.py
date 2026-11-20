@@ -283,7 +283,7 @@ def test_every_run_is_logged_as_json_with_a_trace_id(con, tmp_path):
     entry = audit.read(path)[-1]
     assert entry["run_id"] == final["run_id"] and entry["status"] == final["status"]
     assert entry["policy_version"] == config.POLICY["version"] and entry["label_version"] == LABEL_VERSION
-    assert set(entry["prompts"]) == {"brief", "claims", "summary", "adverse_event"}
+    assert set(entry["prompts"]) == {"brief", "chat", "claims", "summary", "adverse_event"}
     assert entry["lanes"] and entry["trace"]
     assert "Robert Hale" not in entry["request"]["message"] and "448812" not in entry["request"]["message"]
 

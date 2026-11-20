@@ -41,7 +41,7 @@ class StubLLM:
     def complete(self, task: str, system: str, user: str, data: dict | None = None) -> str:
         """Route to the stub answer for each task."""
         return {"brief": self._brief, "claims": self._claims, "summary": self._summary,
-                "ae": self._ae}[task](data or {})
+                "ae": self._ae, "chat": self._chat}[task](data or {})
 
     def _brief(self, d: dict) -> str:
         """A short brief built only from the inputs, citing a source id for each point."""
@@ -68,6 +68,10 @@ class StubLLM:
     def _summary(self, d: dict) -> str:
         """The stub's summary is the plain one."""
         return plain_summary(d)
+
+    def _chat(self, d: dict) -> str:
+        """The stub answers a provider question with the facts built in code."""
+        return d.get("fallback", "")
 
     def _ae(self, d: dict) -> str:
         """Called only when no adverse-event keyword matched; the stub agrees with the keywords."""
