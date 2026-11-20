@@ -176,11 +176,13 @@ def show_result(result: dict) -> None:
             record_decision("accepted", f"{result['request']['flow']}: {', '.join(ids)}")
             st.session_state["result"] = None
             st.session_state["history"].append(f"Approved: booked {len(ids)} call(s)")
+            st.session_state["notice"] = f"Booked {len(ids)} call(s). They are on your calendar now."
             st.rerun()
         if c2.button("Reject", use_container_width=True):
             record_decision("rejected", f"{result['request']['flow']}: {len(plan['visits'])} call(s) proposed")
             st.session_state["result"] = None
             st.session_state["history"].append("Rejected the proposed plan")
+            st.session_state["notice"] = "Plan rejected: nothing was booked, and your day is unchanged."
             st.rerun()
     for b in (result.get("briefs") or {}).values():
         if status == "brief_ready":
@@ -277,6 +279,9 @@ if view == "Rep: my day":
                                                    "now_min": now_min, "message": ask},
                                              col=col, drive=drive, log_path=st.session_state["log"])
             st.rerun()
+        notice = st.session_state.pop("notice", None)
+        if notice:
+            st.success(notice)
         if result:
             show_result(result)
         for h in st.session_state["history"][-3:]:

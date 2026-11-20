@@ -131,6 +131,14 @@ def _check_line(checks: dict) -> str:
     return f"; guardrails: {'; '.join(parts)}" if parts else ""
 
 
+def partial_cause(why: str) -> str:
+    """Why a brief is partial, in the rep's words."""
+    if why.startswith("model"):
+        return ("the daily free-model limit is reached" if "daily" in why
+                else "the model is switched off" if "kill switch" in why else "the model did not answer")
+    return "label and trial sources unavailable"
+
+
 def _partial(con, payload: dict, why: str, checks: dict | None = None) -> dict:
     """A brief from structured data only, for when retrieval or the model is down. It cites nothing and claims nothing."""
     v, day, rep_id = payload["visit"], payload["day"], payload["rep_id"]
@@ -144,7 +152,7 @@ def _partial(con, payload: dict, why: str, checks: dict | None = None) -> dict:
         contacts = location_contacts(con, v["location_id"])
     how = "Visit" if v["call_type"] == "face_to_face" else "Phone call with"
     lines = [f"{how} {p['full_name']} (tier {p['tier']}) at {v['start']}.",
-             "Partial brief: label and trial sources unavailable, so no product claims for this call."]
+             f"Partial brief: {partial_cause(why)}, so no product claims for this call."]
     if reasons:
         lines.append("Why this provider: " + "; ".join(reasons) + ".")
     lines.append("Recent calls: " + ("; ".join(f"{c['date']} {c['call_type'].replace('_', ' ')} ({c['outcome']})"

@@ -28,6 +28,7 @@ import hashlib
 import sqlite3
 
 from navinib import guardrails
+from navinib.agents.brief import partial_cause
 from navinib.agents.llm import plain_summary
 from navinib.config import BRIEF_GEN_MARGIN_MIN, BRIEF_READ_MIN, MAX_REFILLS, MAX_RETRIES, POLICY
 from navinib.log import get_logger
@@ -317,7 +318,7 @@ def _finish_brief(state: dict, con: sqlite3.Connection, flags: list) -> dict:
     con.commit()
     message = f"Brief ready for {v['start']} {v['full_name']}."
     if b["status"] == "partial":
-        message += " It is partial: label and trial sources unavailable, so no product claims."
+        message += f" It is partial ({partial_cause(b.get('why', ''))}), so no product claims."
     for w in state.get("compliance", {}).get("warnings", []):
         message += f" Note: {w}."
     if flags:
