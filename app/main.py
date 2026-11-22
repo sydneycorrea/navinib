@@ -202,7 +202,11 @@ def calendar(events: list, proposed: list, briefed: set, now_min: int) -> str:
     for e in events:
         sub = f"{e['start']}–{e['end']}"
         if e["status"] == "cancelled":
-            covered = any(to_min(v["start"]) < e["end_min"] and e["start_min"] < to_min(v["end"]) for v in proposed)
+            overlaps = lambda s, en: s < e["end_min"] and e["start_min"] < en   # noqa: E731
+            if any(o["kind"] == "call" and o["status"] != "cancelled" and overlaps(o["start_min"], o["end_min"])
+                   for o in events):
+                continue   # the rep booked new calls in its time: the cancelled call adds nothing now
+            covered =any(to_min(v["start"]) < e["end_min"] and e["start_min"] < to_min(v["end"]) for v in proposed)
             # Drawn behind and faint; when new calls fill its time, it keeps only a thin edge so nothing overlaps.
             rows.append(block(e["start_min"], e["end_min"], "" if covered else e["title"],
                               "" if covered else sub + " · cancelled", "#f3f4f6", "#d1d5db",
