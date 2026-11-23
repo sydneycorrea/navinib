@@ -37,3 +37,14 @@ def test_manager_view_is_read_only_team_level():
     assert not at.exception
     assert [m.label for m in at.metric][:2] == ["Tier A on goal", "Providers overdue (60+ days)"]
     assert not [b for b in at.button if b.label in ("Approve and book", "Plan my day")]
+
+
+def test_cancelled_call_shows_until_the_replan_is_booked():
+    at = AppTest.from_file(APP, default_timeout=120).run()
+    struck = lambda: any("Call: Dr. Helen Smith" in m.value and "line-through" in m.value  # noqa: E731
+                         for m in at.markdown)
+    [s for s in at.selectbox if s.label == "Time now (simulated)"][0].set_value("13:05").run()
+    at.chat_input[0].set_value("Dr. Smith cancelled").run()
+    assert struck()          # while the replan waits for approval, the cancelled call stays in view
+    at.chat_input[0].set_value("book it").run()
+    assert not struck()      # once new calls are booked in its time, it is gone
